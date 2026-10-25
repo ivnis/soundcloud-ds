@@ -7,14 +7,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $python = Join-Path $PSScriptRoot '.venv/Scripts/python.exe'
 if (!(Test-Path -LiteralPath $python)) {
-    throw 'Create .venv and install requirements-windows.txt first; see README.md.'
+    throw 'Double-click Setup Server.cmd first to install the server dependencies.'
 }
 Push-Location $PSScriptRoot
 try {
     $env:SC_SOURCE = $Source
     $env:SC_TRACK_URL = $Track
     $env:FFMPEG_BIN = & $python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'
-    if ($LASTEXITCODE -ne 0) { throw 'Install requirements-windows.txt first.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Run Setup Server.cmd to repair the server dependencies.' }
     Write-Host "Bridge: http://${BindAddress}:$Port ($Source). Press Ctrl+C to stop."
     & $python -m uvicorn server.app:app --host $BindAddress --port $Port --workers 1
     if ($LASTEXITCODE -ne 0) { throw 'Bridge exited with an error.' }

@@ -9,9 +9,20 @@ audio conversion, artwork, and related tracks. It is not a desktop music player.
 
 ## Docker / Linux VPS
 
-Requires Docker and Docker Compose. Extract the entire archive, open its folder,
-copy `.env.example` to `.env`, and set `SC_SOURCE=soundcloud` for music
-(`test` is the default ten-minute test tone).
+Requires Docker and Docker Compose. On Windows, install and start Docker Desktop
+before running the command below. You do **not** need Python or the Python
+setup/start scripts when using Docker.
+
+1. Extract the entire **server ZIP** with **Extract All**.
+2. Open the extracted folder containing **compose.yaml**. This is the server
+   folder, not the Downloads folder, the ZIP itself, or the inner `server` folder.
+3. On Windows, click File Explorer's address bar, type `powershell`, and press
+   Enter. The terminal opens in that folder; there is no need to type `cd`.
+   On macOS/Linux, open a terminal in that folder. If changing folders manually,
+   use `cd "path/to/extracted-folder"`, replacing the example with your real path.
+4. Copy `.env.example` to `.env` and set `SC_SOURCE=soundcloud` for music
+   (`test` is the default ten-minute test tone).
+5. Run:
 
 ```sh
 docker compose up -d --build
@@ -21,9 +32,28 @@ curl http://127.0.0.1:8000/healthz
 The bridge listens on port **8000**. To stop it: `docker compose down`.
 After editing `.env`: `docker compose up -d --force-recreate`.
 
+If you see **no configuration file provided**, the terminal is in the wrong
+folder: check that `compose.yaml` is present. If **docker is not recognized**,
+install Docker Desktop and reopen the terminal. If Docker reports that it cannot
+connect to the daemon, start Docker Desktop and wait for the engine to be ready.
+Use `docker compose logs -f bridge` to inspect bridge errors.
+
 ## Windows
 
-Install Python 3.13. From the extracted folder in PowerShell:
+1. Download the **server ZIP** from the release's Downloads/Assets section.
+   This is separate from the `.nds` and GitHub's automatic **Source code** ZIP.
+2. Right-click the server ZIP and choose **Extract All**. Open the extracted
+   folder; do not run scripts while browsing inside the compressed ZIP.
+3. Install Python 3.13 if it is not installed already.
+4. Double-click **Start Server.cmd**. On first launch it creates `.venv` and
+   installs dependencies automatically; leave the window open while it runs.
+
+No `cd` command or manually opened terminal is required. **Setup Server.cmd**
+can also be used separately to install or repair dependencies.
+
+For manual setup, open the extracted folder in File Explorer, click its address
+bar, type `powershell`, and press Enter. That opens a terminal in the correct
+folder, so you do not need to type `cd`. Then run:
 
 ```powershell
 python -m venv .venv

@@ -43,7 +43,8 @@ def main():
             entries[path] = git('show', f'HEAD:{path}')
     for path in ('LICENSE', 'VERSION', '.env.example', '.dockerignore', 'compose.yaml', 'deploy/Dockerfile'):
         entries[path] = git('show', f'HEAD:{path}')
-    for name in ('README.md', 'README.ru.md', 'requirements-windows.txt', 'start-server.ps1', 'Start Server.cmd'):
+    for name in ('README.md', 'README.ru.md', 'requirements-windows.txt',
+                 'start-server.ps1', 'Start Server.cmd', 'setup-server.ps1', 'Setup Server.cmd'):
         data = git('show', f'HEAD:deploy/server/{name}')
         if name.endswith('.md'):
             data = data.replace(b'(../../LICENSE)', b'(LICENSE)')
