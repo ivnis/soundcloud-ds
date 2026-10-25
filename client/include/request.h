@@ -1,0 +1,27 @@
+#pragma once
+#include "http.h"
+
+class NetRequest {
+public:
+    enum class State { Idle, Connecting, Sending, Receiving, Done, Error };
+    explicit NetRequest(bool pcm) : response_(pcm), pcm_(pcm) {}
+    bool begin(const char* path, unsigned frame);
+    void cancel();
+    void poll(unsigned frame, unsigned budget, HttpAudio::Sink sink, void* context);
+    State state() const { return state_; }
+    bool active() const { return state_ == State::Connecting || state_ == State::Sending || state_ == State::Receiving; }
+    const HttpAudio& response() const { return response_; }
+    const char* error() const { return error_; }
+private:
+    HttpAudio response_;
+    bool pcm_;
+    int socket_ = -1;
+    State state_ = State::Idle;
+    unsigned lastActivity_ = 0;
+    char request_[1024]{};
+    unsigned sent_ = 0, length_ = 0;
+    const char* error_ = "";
+    void close();
+    void fail(const char* message);
+    void finish();
+};

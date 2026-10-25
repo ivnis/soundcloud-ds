@@ -1,0 +1,31 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+client/build/
+client/*.nds
+client/include/config.local.h
+tools/.cache/
+tools/melonds/
+
+# Build outputs and local runtime data
+*.o
+*.elf
+*.map
+*.nds
+*.exe
+*.log
+soundcloud-ds.cfg
+*.sav
+*.dsv
+bios*.bin
+firmware*.bin
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini

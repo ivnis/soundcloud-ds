@@ -1,0 +1,23 @@
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      SC_SOURCE: ${SC_SOURCE:-test}
+      SC_TRACK_URL: ${SC_TRACK_URL:-}
+      SC_TEST_SECONDS: ${SC_TEST_SECONDS:-600}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
