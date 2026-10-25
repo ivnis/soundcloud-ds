@@ -51,3 +51,11 @@ that the hosted workflow has run successfully.
 For a future release, publish the `.nds` alongside a source tag and describe
 which emulator/hardware checks were actually completed. Real DS Fat validation
 and a long continuous autoplay session are still pending.
+
+## Tagged releases
+
+The Release workflow runs on `v*` tags, gates publication on server/native tests
+and an ARM build, and uploads separate `.nds` and server `.zip` downloads plus
+SHA256SUMS.txt. The tag must match VERSION and have release notes at
+`docs/RELEASE_vX.Y.Z.md`. The server ZIP is assembled from committed files by
+`tools/package_release.py`; local secrets and runtime files are excluded.

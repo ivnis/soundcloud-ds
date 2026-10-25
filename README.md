@@ -29,6 +29,17 @@ Accounts, private libraries, playlists, and stereo are not implemented.
 
 ## Quick start
 
+### Release downloads
+
+Get [v0.1.0](https://github.com/ivnis/soundcloud-ds/releases/tag/v0.1.0):
+
+- [Nintendo DS ROM](https://github.com/ivnis/soundcloud-ds/releases/download/v0.1.0/soundcloud-ds-v0.1.0.nds)
+- [Standalone server ZIP](https://github.com/ivnis/soundcloud-ds/releases/download/v0.1.0/soundcloud-ds-server-v0.1.0.zip)
+
+Download both, run the bridge, and load the ROM. The server ZIP contains its own
+English/Russian setup guides and a Windows launcher. Source-build instructions
+follow below. Check SHA256SUMS.txt on the release page to verify downloads.
+
 Requirements: Python 3.13, FFmpeg, a BlocksDS toolchain or Docker, and melonDS
 or a compatible flashcart. SDKs, emulator binaries, and firmware are not bundled.
 

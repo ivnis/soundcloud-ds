@@ -9,6 +9,7 @@ client/*.nds
 client/include/config.local.h
 tools/.cache/
 tools/melonds/
+dist/
 
 # Build outputs and local runtime data
 *.o

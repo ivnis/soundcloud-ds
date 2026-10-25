@@ -16,6 +16,12 @@ SoundCloud → soundcloud-v2 → FFmpeg на VPS → TCP/HTTP → буфер DS 
 
 ## Быстрый запуск сервера в Windows
 
+Готовые файлы [релиза v0.1.0](https://github.com/ivnis/soundcloud-ds/releases/tag/v0.1.0)
+скачиваются отдельно: **soundcloud-ds-v0.1.0.nds** — клиент и
+**soundcloud-ds-server-v0.1.0.zip** — сервер. В серверном архиве есть собственные
+инструкции на русском и английском, запуск для Windows и Docker Compose.
+Нужны оба файла и работающий bridge. Контрольные суммы — в SHA256SUMS.txt релиза.
+
 Из корня проекта, Python 3.13:
 
 ```powershell
