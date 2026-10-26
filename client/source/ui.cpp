@@ -113,9 +113,9 @@ void topScreen(Canvas& c,const UiModel& m) {
     c.centerText(88,top+titleHeight+6,156,artistHeight,author,muted,2);
     if(m.status==PlayStatus::Error)c.centerText(12,148,232,22,m.message,red,2);
     if(m.diagnostics && m.status!=PlayStatus::Error){
-        char label[64];std::snprintf(label,sizeof(label),"Buf %u.%us  Net %u.%uK/s  Gaps %u",
+        char label[64];std::snprintf(label,sizeof(label),"Buf %u.%us Net %u.%uK/s G%u R%u",
             m.bufferMs/1000,(m.bufferMs%1000)/100,m.wireBytesPerSecond/1000,
-            (m.wireBytesPerSecond%1000)/100,m.underruns);
+            (m.wireBytesPerSecond%1000)/100,m.underruns,m.reconnects);
         c.centerText(12,148,232,16,label,muted);
     }
     if(m.showVolume){

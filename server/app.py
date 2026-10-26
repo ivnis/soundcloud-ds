@@ -132,8 +132,9 @@ def create_app(settings=None, source=None, job_factory=None, artwork_store=None)
         nonlocal active_control
         if (session is None) != (request_id is None):
             raise HTTPException(422, "Session and request_id must be supplied together")
-        if handoff.locked():
-            raise HTTPException(409, "Audio stream switch in progress")
+        # Serialize stream replacement instead of rejecting a reconnect that
+        # arrives while the previous FFmpeg job is being stopped. The lock is
+        # held only for the bounded handoff/cleanup path below.
         async with handoff:
             if session and request_id <= latest_requests.get(session, 0):
                 raise HTTPException(409, "This audio request was superseded")

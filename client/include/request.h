@@ -13,9 +13,11 @@ public:
     bool active() const { return state_ == State::Resolving || state_ == State::Connecting || state_ == State::Sending || state_ == State::Receiving; }
     const HttpAudio& response() const { return response_; }
     const char* error() const { return error_; }
+    bool recoverable() const { return recoverable_; }
 private:
     HttpAudio response_;
     bool pcm_;
+    bool recoverable_ = false;
     int socket_ = -1;
     State state_ = State::Idle;
     unsigned lastActivity_ = 0;
@@ -24,6 +26,6 @@ private:
     unsigned sent_ = 0, length_ = 0;
     const char* error_ = "";
     void close();
-    void fail(const char* message);
+    void fail(const char* message, bool recoverable = false);
     void finish();
 };

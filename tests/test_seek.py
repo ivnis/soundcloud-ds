@@ -89,7 +89,8 @@ def test_generated_audio_seek_emits_only_remaining_duration():
     asyncio.run(check())
 
 
-def test_input_seek_matches_known_pcm_samples(tmp_path):
+@pytest.mark.parametrize("start_ms", [500, 501, 731])
+def test_input_seek_matches_known_pcm_samples(tmp_path, start_ms):
     # A deterministic, nonperiodic PCM fixture verifies the actual sample
     # position, rather than merely checking timestamps or a constant sine.
     path = tmp_path / "position.wav"
@@ -105,14 +106,15 @@ def test_input_seek_matches_known_pcm_samples(tmp_path):
     async def check():
         settings = Settings(ffmpeg=os.getenv("FFMPEG_BIN", "ffmpeg"))
         track = Track("position", "test", 2000, "", str(path))
-        job = await AudioJob.open(settings, track, 500)
+        job = await AudioJob.open(settings, track, start_ms)
         blocks = []
         try:
             while block := await job.read():
                 blocks.append(block)
         finally:
             await job.close()
-        assert b"".join(blocks) == pcm[rate:]
+        first_sample = (start_ms * rate + 500) // 1000
+        assert b"".join(blocks) == pcm[first_sample * 2:]
 
     asyncio.run(check())
 

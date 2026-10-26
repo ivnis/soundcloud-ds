@@ -20,13 +20,13 @@ with integer arithmetic, has no codec library dependency on the DS, and does
 not wait for the complete track to be converted. Actual hardware throughput
 and listening quality must still be tested on a DS.
 
-The six-second prefill is 264,600 decoded bytes, requiring roughly 67.7 KB
+The three-second prefill is 132,300 decoded bytes, requiring roughly 33.8 KB
 on the network. The six-second history/20-second lookahead stay in PCM for
 instant local seeking. Requests outside this window restart encoding at the
 requested sample position. Sample counts avoid padding at the track end.
-After underruns, the refill target grows to 8, 10, then at most 12 seconds.
-This trades a longer initial/refill wait for fewer repeated pauses. It cannot
-compensate for an average connection speed below the encoded audio rate.
+The client uses the same three-second target after an underrun. The large ahead
+window absorbs jitter while playback continues. It cannot compensate for an
+average connection speed below the encoded audio rate.
 
 Artwork remains exactly 64x64, 256 colors, 4,624 wire bytes. It can start after
 0.25 seconds of decoded audio has arrived, rather than waiting for two seconds.
@@ -43,9 +43,13 @@ audio buffer even when a desktop with a larger TCP window downloads quickly.
 This is a plausible contributor to the reported repeated pauses; the actual
 DS-to-edge RTT/packet loss have not been measured.
 
-The ROM Makefile builds a pinned ARM9 DSWifi library with a 46,720-byte receive
-window (32 MSS), without changing the installed SDK. The first build needs Git,
-Internet access, and the SDK's usual POSIX tools; sources/builds live in ignored
+The ROM Makefile builds a pinned ARM9 DSWifi library with a 10,220-byte receive
+window (7 MSS), below the 12 KiB shared RX buffer with some headroom. At 500 ms
+RTT its window-limited ceiling is about 20 KB/s. A larger window may leave too
+little space for DSWifi's shared packet queue and increase packet loss.
+the previous 32-MSS experiment while protecting the radio packet queue. It
+does not diagnose or eliminate an independently stalled access point or tunnel.
+The first build needs Git, Internet access, and the SDK's usual POSIX tools; sources/builds live in ignored
 `tools/.cache/dswifi-stream`. Subsequent builds reuse the archive. Memory is
 allocated as needed; a larger window does not preallocate the entire audio
 track. The 20-second PCM window uses 1,146,600 bytes including six seconds of
@@ -53,6 +57,24 @@ history. The linked ROM must still be tested for stability on DS Fat.
 
 Source: [pinned lwIP settings](https://github.com/blocksds/dswifi/blob/59d2636dd851ea26a4ea49f329321d3bfb002066/source/arm9/lwip/include/lwipopts.h).
 DSWifi and lwIP licenses are retained in `client/assets/DSWIFI-COPYING*`.
+
+### Reading after the buffer fills
+
+Previously the PCM-space budget was recalculated on every frame. Once near
+full, the window could allow reads of only 1–255 wire bytes. The new download
+gate reads every frame as soon as it can accept a 2 KiB burst, with an 8 KiB
+per-frame maximum. It stops only when less than about 9 KiB of decoded space
+remains, protecting the PCM window from a partially received block. That is
+under 0.21 seconds of audio. Actual socket reads can still return fewer bytes
+when the network supplies fewer. The 20-second buffer fills as fast as the
+network and ARM9 decoder allow, then resumes quickly as playback creates room.
+
+The larger TCP window changed lwIP's default explicit window-update threshold
+from 1,460 to 5,840 bytes (`min(TCP_WND/4, TCP_MSS*4)`). The build now pins this
+threshold to one MSS (1,460 bytes), so freed receive space is advertised sooner.
+The versioned preparation stamp applies this change to existing cached builds.
+These address small-read overhead and receive-window update latency; whether
+they resolve the physical console's reported slowdown remains to be tested.
 
 ## Compatibility and diagnostics
 
@@ -85,10 +107,33 @@ timeout on Windows and left pipe transports open. Cleanup now terminates and
 drains stdout under a read lock while waiting for exit. The regression test
 requires cleanup in under two seconds with the output pipe deliberately full.
 
-Press X to toggle the existing diagnostic overlay: buffered seconds, recent
-wire KB/s, and underrun count. The rate is sampled over approximately two seconds;
+Press SELECT to toggle the existing diagnostic overlay: buffered seconds, recent
+wire KB/s, underrun count (`G`) and automatic reconnect count (`R`). The rate is sampled over approximately half a second;
 it naturally falls when a full audio buffer applies backpressure. Compare the
 rate while the buffer is low with the codec's 11.3 KB/s requirement.
+
+### Silent TCP stalls
+
+An associated Wi-Fi link does not prove its TCP stream is still delivering data.
+The previous client waited up to 65 seconds for the general network timeout.
+The audio request is polled every frame while Wi-Fi is connected, including
+startup buffering, underruns and pause. Buffer size alone never restarts the
+request. Playback waits for three seconds after an underrun; explicit socket
+failures and truncated responses can still trigger recovery, with increasing
+retry delays capped at one second. 32 KiB of useful transfer resets the delay.
+
+Recovery resumes from the END of retained decoded audio, not from the beginning
+of the song. It retains playback position, history, cover, volume and pause state.
+The millisecond seek rounds down; the small duplicated PCM prefix is discarded
+before appending, accounting for FFmpeg's nearest-sample seek rounding. Session ownership
+lets the bridge replace the old request even if its disconnect is delayed.
+
+Transport recovery reopens TCP without flushing the cached DNS address. It does
+not reassociate the radio or retain Wi-Fi passwords. If the Wi-Fi driver/link
+itself cannot transfer packets, audio remains buffered while retries continue;
+a manual Wi-Fi reconnect may still be necessary. Physical DS testing is required
+to distinguish this from a proxy or TCP stall. Variable speed alone is normal
+when the buffer fills.
 
 ### Transport compatibility
 

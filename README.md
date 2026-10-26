@@ -162,9 +162,10 @@ Decoded audio is mono, signed 16-bit little-endian PCM at 22,050 Hz.
 Development ROMs request IMA ADPCM (about 11.3 KB/s); the default endpoint and
 released v0.2.0 ROM use PCM (44.1 KB/s). See [audio transport](docs/AUDIO.md).
 Development ROMs keep six seconds of history and up to 20 seconds ahead;
-startup waits for six seconds of audio, with adaptive 8–12-second recovery
-after underruns. Their pinned DSWifi build uses a larger TCP receive window.
-The v0.2.0 release used eight seconds ahead/two seconds of startup audio.
+startup and recovery use a three-second audio threshold. The client fills
+available buffer space quickly, with brief batching near capacity. Their pinned
+DSWifi build uses a larger TCP receive window. The v0.2.0 release used eight
+seconds ahead/two seconds of startup audio.
 Distant seeks may require server rebuffering.
 Artwork is a 4,624-byte indexed packet, decoded to RGB555 on the DS.
 

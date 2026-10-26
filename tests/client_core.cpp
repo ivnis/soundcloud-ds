@@ -4,6 +4,8 @@
 #include "dns_cache.h"
 #include "http.h"
 #include "config.h"
+#include "recovery.h"
+#include "download.h"
 #include "ring.h"
 #include "search.h"
 #include "text.h"
@@ -18,6 +20,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <memory>
 
 static bool sink(void* context, const uint8_t* data, std::size_t count) {
     auto& out = *static_cast<std::vector<uint8_t>*>(context);
@@ -42,10 +45,85 @@ static void parseEveryBoundary(const std::string& wire, const std::string& expec
 }
 
 int main() {
+    {
+        AudioDownload gate;
+        assert(gate.budget(1024)==0);
+        assert(gate.budget(8192)==0);
+        assert(gate.budget(9216)==2048);
+        assert(gate.budget(16384)>2048);
+        assert(gate.budget(1025)==0);
+        assert(gate.budget(8192)==0);
+        for(unsigned room=1;room<100000;room+=73) {
+            unsigned budget=gate.budget(room);
+            assert(!budget || (budget>=2048 && budget<=8192 && budget*4+1024<=room));
+        }
+    }
+    {
+        StreamRecovery recovery;
+        recovery.reset(0);
+        for(unsigned tick=0;tick<600;++tick) {
+            recovery.observe(tick, tick%120==0 ? 1024 : 0, true);
+            assert(!recovery.stalled(tick));
+        }
+        recovery.observe(600,0,false); // Paused or full: no false restart.
+        recovery.observe(6000,0,false);
+        assert(!recovery.stalled(6000));
+        assert(!recovery.stalled(6299) && recovery.stalled(6300));
+        for(unsigned retry=0;retry<5;++retry) {
+            unsigned at=6300+retry*300;
+            assert(recovery.retry(at));
+            assert(!recovery.stalled(at+299) && recovery.stalled(at+300));
+        }
+        recovery.observe(7900,32768,true); // Useful transfer keeps recovery healthy.
+        assert(recovery.retry(8200));
+        for(uint64_t sample=0;sample<22050*180;sample+=997) {
+            auto resume=resumePoint(sample,22050);
+            assert(resume.skipBytes%2==0 && resume.skipBytes<=44);
+            assert((static_cast<uint64_t>(resume.milliseconds)*22050+500)/1000+resume.skipBytes/2==sample);
+        }
+    }
+    {
+        // Exercise the real codec + HTTP parser + production-sized seek window
+        // past many ring wraps, including backpressure and 5s network stalls.
+        using Window = SeekBuffer<kBufferBytes,kHistoryBytes,kAheadBytes>;
+        auto window = std::make_unique<Window>();
+        std::string block(262,'\0');
+        block[1]=4;block[5]=2; // predictor 1024, 512 samples, index 0
+        const unsigned blocks=22050*180/512;
+        std::string wire="HTTP/1.0 200 OK\r\nX-Audio-Rate: 22050\r\nX-Audio-Channels: 1\r\n"
+            "X-Audio-Format: ima4-ds-v1\r\nContent-Length: "+std::to_string(blocks*262)+"\r\n\r\n";
+        for(unsigned i=0;i<blocks;++i)wire+=block;
+        HttpAudio parser;
+        AudioDownload download;
+        auto write=[](void* p,const uint8_t* data,std::size_t n)->bool {
+            return static_cast<Window*>(p)->write(data,n)==n;
+        };
+        std::size_t at=0,total=0;
+        uint8_t pcm[1470]; // 1/60 s, 735 samples
+        bool started=false;
+        for(unsigned tick=0;tick<60*240 && (at<wire.size() || window->size());++tick) {
+            // Pause downloads for five seconds every 30 seconds.
+            bool outage=tick>=1800 && tick%1800<300;
+            if(!outage && at<wire.size()) {
+                auto room=window->free();
+                auto take=std::min<std::size_t>({download.budget(static_cast<unsigned>(room)),wire.size()-at,2048});
+                assert(parser.feed(reinterpret_cast<const uint8_t*>(wire.data()+at),take,write,window.get()));
+                at+=take;
+            }
+            if(!started && window->size()>=kPrefillBytes)started=true;
+            if(started && window->size()) {
+                if(at<wire.size())assert(window->size()>=sizeof(pcm));
+                auto n=window->read(pcm,sizeof(pcm));
+                for(unsigned i=0;i<n;i+=2)assert(pcm[i]==0 && pcm[i+1]==4);
+                total+=n;
+            }
+        }
+        assert(at==wire.size() && total==blocks*1024 && parser.eof());
+    }
     static_assert(kAheadBytes >= rebufferBytes(100), "Recovery must fit the ahead window");
-    assert(kPrefillBytes == kBytesPerSecond * 6);
-    assert(rebufferBytes(1) == kBytesPerSecond * 8);
-    assert(rebufferBytes(2) == kBytesPerSecond * 10);
+    assert(kPrefillBytes == kBytesPerSecond * 3);
+    assert(rebufferBytes(1) == kBytesPerSecond * 3);
+    assert(rebufferBytes(2) == kBytesPerSecond * 3);
     assert(rebufferBytes(3) == rebufferBytes(100));
     // IMA reference vector, independent of the server implementation:
     // predictor 0/index 0, codes 7,F,7,F -> 11,-19,44,-92.

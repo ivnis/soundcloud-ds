@@ -19,6 +19,8 @@
 #include "wifi_key.h"
 #include "wifi_scan.h"
 #include "dns.h"
+#include "recovery.h"
+#include "download.h"
 
 static SeekBuffer<kBufferBytes, kHistoryBytes, kAheadBytes> audio;
 static NetRequest audioRequest(true), searchRequest(false);
@@ -28,7 +30,7 @@ static char relatedBody[16384]{}, recentTracks[24][24]{};
 static unsigned relatedSize=0, relatedAt=0, relatedRetries=0, recentCount=0, recentCursor=0;
 static bool relatedPending=false, relatedBusy=false, autoAdvance=false;
 static uint8_t visualTarget[32]{}, visualLevels[32]{};
-static void pollRelated();
+static void pollRelated(unsigned maxBudget = 4096);
 static Artwork artwork;
 static uint8_t artworkBody[kArtworkBytes]{};
 static unsigned artworkSize = 0, artworkAt = 0, artworkRetries = 0;
@@ -70,6 +72,11 @@ static unsigned audioStart = 0, audioAt = 0;
 static char audioSession[17]{};
 static unsigned audioSerial = 0;
 static unsigned wireSampleBytes = 0, wireSampleAt = 0, wireBytesPerSecond = 0;
+static bool wireSampleStarted = false;
+static StreamRecovery recovery;
+static AudioDownload audioDownload;
+static unsigned resumeSkipBytes = 0;
+static unsigned streamReconnects = 0;
 static bool audioPending = false, searchPending = false, searching = false, searched = false;
 static bool russianKeyboard = false, numberKeyboard = false, diagnostics = false;
 static int keyboardSelected = 0;
@@ -102,7 +109,9 @@ static void stopAudio(bool resetTime = true) {
     audio.clear();
     paused = false; buffering = true; receivedEOF = false;
     metadataRead = false; drainFrame = 0;
-    wireSampleBytes = wireBytesPerSecond = 0; wireSampleAt = frame;
+    wireSampleBytes = wireBytesPerSecond = 0; wireSampleAt = frame; wireSampleStarted = false;
+    recovery.reset(frame); resumeSkipBytes = 0;
+    streamReconnects = 0;
     if (resetTime) { playedSamples = 0; streamStartMs = 0; }
     playback = Playback::Stopped;
 }
@@ -153,7 +162,11 @@ static void openAudio() {
     streamOpen = true;
 }
 
-static bool audioSink(void*, const uint8_t* bytes, std::size_t count) { return audio.write(bytes, count) == count; }
+static bool audioSink(void*, const uint8_t* bytes, std::size_t count) {
+    auto skip=std::min<std::size_t>(count,resumeSkipBytes);
+    bytes+=skip; count-=skip; resumeSkipBytes-=skip;
+    return audio.write(bytes,count)==count;
+}
 static bool searchSink(void*, const uint8_t* bytes, std::size_t count) {
     if (searchSize + count >= sizeof(searchBody)) return false;
     std::memcpy(searchBody + searchSize, bytes, count);
@@ -269,6 +282,20 @@ static void stepTrack(int direction) {
     playTrack(&results.tracks[selected]);
 }
 
+static bool recoverAudio() {
+    auto resume=resumePoint(audio.endSample(),kSampleRate);
+    if (!trackDurationMs || resume.milliseconds>=trackDurationMs || !recovery.retry(frame)) return false;
+    // Keep the cached endpoint address for a body stall. DNS is invalidated
+    // by NetRequest only when connect itself proves that the address failed.
+    audioRequest.cancel();
+    streamStartMs=resume.milliseconds; resumeSkipBytes=resume.skipBytes;
+    metadataRead=receivedEOF=false;
+    audioPending=true; audioAt=frame+recovery.retryDelayFrames(); audioStart=frame;
+    ++streamReconnects;
+    // Keep decoded audio, history, playback position, cover and pause state.
+    return true;
+}
+
 static void pollAudio() {
     if (audioPending && frame >= audioAt) {
         char path[192];
@@ -276,13 +303,22 @@ static void pollAudio() {
         audioPending = false;
         audioRequest.begin(path, frame);
     }
-    // A partially received ADPCM block can release 1024 decoded bytes at once.
-    // Reserve that space before allowing up to 4x wire-to-PCM expansion.
+    // Read up to 8 KiB of wire data each VBlank when PCM space allows. Reserve
+    // space for a pending block and its 4x wire-to-PCM expansion.
     unsigned room = static_cast<unsigned>(audio.free());
+    unsigned budget = audioDownload.budget(room);
     uint64_t previousBytes = audioRequest.response().bodyBytes();
-    audioRequest.poll(frame, room > 1024 ? (room - 1024) / 4 : 0, audioSink, nullptr);
-    wireSampleBytes += static_cast<unsigned>(audioRequest.response().bodyBytes() - previousBytes);
-    if (frame - wireSampleAt >= 120) {
+    audioRequest.poll(frame, budget, audioSink, nullptr);
+    unsigned received=static_cast<unsigned>(audioRequest.response().bodyBytes() - previousBytes);
+    if (received) {
+        if (!wireSampleStarted) {
+            // Exclude DNS/connect/FFmpeg startup from the sustained receive rate.
+            wireSampleStarted = true; wireSampleAt = frame; wireSampleBytes = 0;
+        }
+        wireSampleBytes += received;
+    }
+    recovery.observe(frame,received,!paused && budget>0 && audioRequest.active());
+    if (wireSampleStarted && frame - wireSampleAt >= 30) {
         wireBytesPerSecond = wireSampleBytes * 60 / (frame - wireSampleAt);
         wireSampleBytes = 0; wireSampleAt = frame;
     }
@@ -291,6 +327,7 @@ static void pollAudio() {
         if ((code == 409 || code == 503) && frame - audioStart < 60 * 38) {
             audioRequest.cancel(); audioPending = true; audioAt = frame + 60;
         } else {
+            if (audioRequest.recoverable() && recoverAudio()) return;
             failAudio(code == 502 || code == 504 ? "Couldn't load this track. A to retry." : audioRequest.error());
         }
         return;
@@ -338,17 +375,15 @@ static void openKeyboard() {
     keyboardSelected = 0;
 }
 
-static void pollArtwork() {
+static void pollArtwork(unsigned maxBudget = 1024) {
     if (artworkPending && frame >= artworkAt && metadataRead && !searching &&
         playback != Playback::Loading && (audio.size() >= kBytesPerSecond / 4 || receivedEOF)) {
         char path[96]; std::snprintf(path, sizeof(path), "/v1/artwork%s%s", *trackId ? "?track_id=" : "", trackId);
         artworkSize = 0; artworkPending = false; artworkAttempted = true;
         artworkRequest.begin(path, frame);
     }
-    // Let the 4.6 KB cover make progress even when audio is still buffering.
-    if (playback == Playback::Active && !paused && audio.size() < kBytesPerSecond / 4 && !receivedEOF) return;
     unsigned room = sizeof(artworkBody) - artworkSize;
-    artworkRequest.poll(frame, std::min(room ? room : 1u, 1024u), artworkSink, nullptr);
+    artworkRequest.poll(frame, std::min(room ? room : 1u, maxBudget), artworkSink, nullptr);
     if (artworkRequest.state() == NetRequest::State::Done) {
         parseArtwork(artworkBody, artworkSize, artwork); artworkRequest.cancel();
     } else if (artworkRequest.state() == NetRequest::State::Error) {
@@ -362,16 +397,15 @@ static bool relatedSink(void*,const uint8_t* bytes,std::size_t count) {
     if(relatedSize+count>=sizeof(relatedBody))return false;
     std::memcpy(relatedBody+relatedSize,bytes,count);relatedSize+=count;relatedBody[relatedSize]=0;return true;
 }
-static void pollRelated() {
+static void pollRelated(unsigned maxBudget) {
     if(relatedPending && frame>=relatedAt && metadataRead && !searching &&
        playback!=Playback::Loading && !artworkPending && !artworkRequest.active() &&
        (!buffering || receivedEOF) && (audio.size()>=kBytesPerSecond*12 || receivedEOF)) {
         char path[96];std::snprintf(path,sizeof(path),"/v1/related%s%s",*trackId?"?track_id=":"",trackId);
         relatedSize=0;relatedPending=false;relatedBusy=true;relatedRequest.begin(path,frame);
     }
-    if(playback==Playback::Active && !paused && audio.size()<kPrefillBytes && !receivedEOF)return;
     if(relatedBusy){
-        relatedRequest.poll(frame,std::min(4096u,static_cast<unsigned>(sizeof(relatedBody)-relatedSize-1)),relatedSink,nullptr);
+        relatedRequest.poll(frame,std::min(maxBudget,static_cast<unsigned>(sizeof(relatedBody)-relatedSize-1)),relatedSink,nullptr);
         if(relatedRequest.state()==NetRequest::State::Done){
             if(!parseSearch(relatedBody,relatedSize,recommendations))recommendations=SearchResults{};
             relatedBusy=false;relatedRequest.cancel();
@@ -474,7 +508,7 @@ static void pageResults(int direction) {
     else if (direction > 0 && results.hasMore && results.nextOffset <= 5000) submitSearch(results.nextOffset);
 }
 
-static void pollSearch() {
+static void pollSearch(unsigned maxBudget = 4096) {
     if (searchPending && frame >= searchAt) {
         char encoded[580], path[768];
         if (!urlEncode(submitted, encoded, sizeof(encoded))) {
@@ -487,7 +521,7 @@ static void pollSearch() {
         searchPending = false;
     }
     unsigned budget = sizeof(searchBody) - searchSize - 1;
-    searchRequest.poll(frame, std::min(budget, 4096u), searchSink, nullptr);
+    searchRequest.poll(frame, std::min(budget, maxBudget), searchSink, nullptr);
     if (searchRequest.state() == NetRequest::State::Error) {
         int status = searchRequest.response().statusCode();
         if (status == 503 && frame - searchStart < 60 * 35) {
@@ -797,6 +831,7 @@ static void render() {
     model.bufferPercent = std::min(100u, static_cast<unsigned>(audio.size() * 100 / kAheadBytes));
     model.bufferMs = static_cast<unsigned>(audio.size() * 1000 / kBytesPerSecond);
     model.wireBytesPerSecond = wireBytesPerSecond;
+    model.reconnects = streamReconnects;
     model.scrubbing = scrubbing;
     model.underruns = underruns; model.frame = frame; model.titleFrame = frame-audioStart; model.russianKeyboard = russianKeyboard;
     model.numberKeyboard = editingWifi?passwordPage!=0:numberKeyboard; model.keyboardSelected = keyboardSelected; model.diagnostics = diagnostics;
@@ -869,7 +904,18 @@ int main() {
         } else if (wifi == Wifi::Ready) {
             if (Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED) {
                 scanWifi(); std::snprintf(message, sizeof(message), "Wi-Fi disconnected. Choose a network.");
-            } else { pollAudio(); pollSearch(); pollSettings(); pollArtwork(); pollRelated(); }
+            } else {
+                pollAudio();
+                // Poll audio first. When its reserve is low, keep the other
+                // sockets moving with small budgets instead of leaving their
+                // TCP receive windows open and unserviced.
+                const bool audioLow = audioRequest.active() && !paused &&
+                    playback == Playback::Active && audio.size() < kPrefillBytes;
+                pollSearch(audioLow ? 512 : 4096);
+                pollSettings();
+                pollArtwork(audioLow ? 256 : 1024);
+                pollRelated(audioLow ? 256 : 4096);
+            }
         }
         if (frame % 6 == 0 || keys) render();
     }
