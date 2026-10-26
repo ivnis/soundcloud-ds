@@ -2,7 +2,7 @@
 
 **English** | [Русский](WIFI.ru.md)
 
-This describes development changes after v0.1.0. The published v0.1.0 ROM does
+This describes v0.2.0. The older v0.1.0 ROM does
 not include the new password keyboard or the DSi-mode initialization change.
 
 | Hardware / execution mode | Supported networks |

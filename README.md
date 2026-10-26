@@ -22,7 +22,7 @@ SoundCloud or Nintendo.
 - Server-prepared 64x64 artwork, a matching UI palette, and audio-reactive visuals.
 - Automatic playback of related tracks, skipping recently played IDs.
 - Separate Emulator/Console server profiles and Wi-Fi settings.
-- Development builds: password entry for WEP and DSi-mode WPA2-Personal;
+- Wi-Fi password entry for WEP and DSi-mode WPA2-Personal;
   see [hardware restrictions and setup](docs/WIFI.md).
 - Shoulder-button volume with a temporary on-screen indicator.
 
@@ -33,16 +33,16 @@ Accounts, private libraries, playlists, and stereo are not implemented.
 
 ### Release downloads
 
-Get [v0.1.0](https://github.com/ivnis/soundcloud-ds/releases/tag/v0.1.0):
+Get [v0.2.0](https://github.com/ivnis/soundcloud-ds/releases/tag/v0.2.0):
 
-- [Nintendo DS ROM](https://github.com/ivnis/soundcloud-ds/releases/download/v0.1.0/soundcloud-ds-v0.1.0.nds)
-- [Standalone server ZIP](https://github.com/ivnis/soundcloud-ds/releases/download/v0.1.0/soundcloud-ds-server-v0.1.0.zip)
+- [Nintendo DS ROM](https://github.com/ivnis/soundcloud-ds/releases/download/v0.2.0/soundcloud-ds-v0.2.0.nds)
+- [Standalone server ZIP](https://github.com/ivnis/soundcloud-ds/releases/download/v0.2.0/soundcloud-ds-server-v0.2.0.zip)
 
 Download both, run the bridge, and load the ROM. The server ZIP contains its own
 English/Russian setup guides and a Windows launcher. Source-build instructions
 follow below. Check SHA256SUMS.txt on the release page to verify downloads.
 
-Requirements: Python 3.13, FFmpeg, a BlocksDS toolchain or Docker, and melonDS
+Source-build requirements: Python 3.13, FFmpeg, a BlocksDS toolchain or Docker, and melonDS
 or a compatible flashcart. SDKs, emulator binaries, and firmware are not bundled.
 
 ```sh
@@ -165,10 +165,10 @@ Use one bridge worker: one audio stream is allowed at a time. The DS-to-bridge
 connection is plain HTTP without authentication. Use a trusted network or limit
 access to your bridge; this prototype is intended for personal use.
 DS Fat/Lite requires an open or WEP 2.4 GHz network; it cannot use WPA/WPA2.
-Current development builds support manual WEP keys and WPA2-Personal on a DSi
+v0.2.0 supports manual WEP keys and WPA2-Personal on a DSi
 actually running in native DSi mode. This is not in the v0.1.0 ROM and physical
 encrypted-network association remains unverified. See [Wi-Fi support](docs/WIFI.md).
-Development builds after v0.1.0 accept IPv4 or DNS names over **HTTP**.
+v0.2.0 accepts IPv4 or DNS names over **HTTP**.
 Use `bridge.example.com:8000` or `http://bridge.example.com`; without a port,
 HTTP defaults to 80. DNS runs in one shared cooperative worker with a bounded
 cache. HTTPS/TLS and IPv6 endpoint syntax are not implemented. The published
@@ -206,7 +206,7 @@ ordinary builds do not require asset-generation tools.
 - [API and architecture](docs/API.md) (English).
 - [Publishing checklist](docs/PUBLISHING.md) (English).
 - [Cloudflare Tunnel without Microsoft Store](docs/CLOUDFLARE.md) (English/Russian;
-  includes HTTP hostname setup for development ROMs).
+  includes HTTP hostname setup for v0.2.0 ROMs).
 - [Русская документация и подробная настройка](README.ru.md).
 - Detailed development notes in Russian: [UI/settings/artwork](docs/UI_ARTWORK_SETTINGS.md),
   [search](docs/SEARCH_UI.md), [seeking](docs/SEEK_AND_ARTWORK.md),

@@ -59,3 +59,5 @@ and an ARM build, and uploads separate `.nds` and server `.zip` downloads plus
 SHA256SUMS.txt. The tag must match VERSION and have release notes at
 `docs/RELEASE_vX.Y.Z.md`. The server ZIP is assembled from committed files by
 `tools/package_release.py`; local secrets and runtime files are excluded.
+Starting with v0.2.0, the server bundle includes first-run setup and the portable
+Cloudflare Tunnel launchers. The ROM banner reads the version from VERSION.

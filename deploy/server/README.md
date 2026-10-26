@@ -1,9 +1,9 @@
-# SoundCloud DS bridge — v0.1.0
+# SoundCloud DS bridge — v0.2.0
 
 **English** | [Русский](README.ru.md)
 
 This archive contains the **server only**. Download
-`soundcloud-ds-v0.1.0.nds` separately from the same GitHub release and load it
+`soundcloud-ds-v0.2.0.nds` separately from the same GitHub release and load it
 in melonDS or on a compatible flashcart. The server handles SoundCloud lookup,
 audio conversion, artwork, and related tracks. It is not a desktop music player.
 
@@ -44,7 +44,7 @@ Use `docker compose logs -f bridge` to inspect bridge errors.
    This is separate from the `.nds` and GitHub's automatic **Source code** ZIP.
 2. Right-click the server ZIP and choose **Extract All**. Open the extracted
    folder; do not run scripts while browsing inside the compressed ZIP.
-3. Install Python 3.13 if it is not installed already.
+3. Install **Python 3.13** if needed: on the [official Windows downloads page](https://www.python.org/downloads/windows/), find Python 3.13, choose **Windows installer (64-bit)**, and run it. Enable **Add python.exe to PATH** during installation.
 4. Double-click **Start Server.cmd**. On first launch it creates `.venv` and
    installs dependencies automatically; leave the window open while it runs.
 
@@ -98,9 +98,15 @@ Open **Settings** (gear on the touchscreen):
 
 - **Emulator:** `10.64.0.1:8765` for the Windows launcher with melonDS indirect
   networking. Use port `8000` for the Docker bridge.
-- **Console:** enter the real numeric LAN/VPS IPv4 and bridge port. The initial
+- **Console:** enter your LAN/VPS IPv4 or DNS hostname and bridge port. The initial
   `192.168.1.100:8000` value is a placeholder.
 - Tap the address to edit it; use **Test connection** before searching.
+
+The v0.2.0 ROM accepts HTTP hostnames, for example `bridge.example.com:8000`.
+Without a port it uses 80. HTTPS/TLS is not implemented in the ROM.
+DS Fat/Lite still needs a compatible open/WEP 2.4 GHz network with legacy rates;
+it cannot use WPA/WPA2. WPA2-Personal/AES entry requires native DSi mode.
+Try anyway is diagnostic and does not unlock unsupported hardware features.
 
 Keep exactly **one worker**. One audio stream is supported per server process.
 The DS-to-bridge connection is plain HTTP without authentication, so limit it
@@ -111,9 +117,32 @@ This first release was tested in melonDS; physical DS Fat and long continuous
 autoplay validation are pending. ROM, SDK, emulator, firmware, audio recordings,
 and Python packages are not bundled here.
 
+## Cloudflare Tunnel on Windows (no Microsoft Store)
+
+1. Start the bridge and leave it running.
+2. Double-click **Start Cloudflare Tunnel.cmd** in the extracted server folder.
+   It downloads the official portable cloudflared and checks its SHA-256.
+3. Wait for `Registered tunnel connection`, then copy the generated hostname.
+4. In ROM Settings, enter `your-tunnel.trycloudflare.com:80`, replacing the
+   example with your hostname. The ROM uses HTTP; do not enter `https://`.
+5. Keep the tunnel window open. Ctrl+C or **Stop Cloudflare Tunnel.cmd** stops
+   the tunnel while leaving the bridge running. A new launch gets a new hostname.
+
+The launcher defaults to the Windows bridge port 8765. For Docker on port 8000,
+open PowerShell in this folder and use:
+
+```powershell
+.\tools\start-cloudflare.ps1 -Port 8000
+```
+
+QUIC is the default transport. No Cloudflare account, domain, Store, or winget
+is needed for this temporary Quick Tunnel. Anyone with the URL can reach it.
+The downloaded executable and session/log files stay under `tools/.cache`.
+It is not a permanent hosting service and has no uptime guarantee.
+
 ## License and source
 
 GPL-3.0-only — see [LICENSE](../../LICENSE). Dependencies retain their own licenses.
-Source and build instructions: https://github.com/ivnis/soundcloud-ds/tree/v0.1.0
+Source and build instructions: https://github.com/ivnis/soundcloud-ds/tree/v0.2.0
 
 Author: [ivnis](https://github.com/ivnis) · https://t.me/lovelyperv

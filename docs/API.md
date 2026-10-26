@@ -4,7 +4,7 @@
 
 The bridge owns upstream SoundCloud HTTPS requests and FFmpeg processes.
 The DS uses nonblocking HTTP/1.0 sockets and Maxmod manual audio updates.
-Development builds accept IPv4 addresses or ASCII DNS hostnames with optional
+v0.2.0 accepts IPv4 addresses or ASCII DNS hostnames with optional
 ports, over HTTP. Missing ports default to 80. HTTPS URLs and IPv6 literals
 are rejected; DNS queries request IPv4 addresses. The v0.1.0 ROM is IPv4-only
 in its endpoint editor.

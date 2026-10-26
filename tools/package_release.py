@@ -51,6 +51,10 @@ def main():
         if name.endswith(('.ps1', '.cmd')):
             data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
         entries[name] = data
+    for path in ('Start Cloudflare Tunnel.cmd', 'Stop Cloudflare Tunnel.cmd',
+                 'tools/start-cloudflare.ps1', 'tools/stop-cloudflare.ps1'):
+        data=git('show',f'HEAD:{path}')
+        entries[path]=data.replace(b'\r\n',b'\n').replace(b'\n',b'\r\n')
     entries['BUILD_INFO.txt'] = (
         f'SoundCloud DS bridge v{version}\nSource commit: {commit}\n'
         f'Source: https://github.com/ivnis/soundcloud-ds/tree/{commit}\n'

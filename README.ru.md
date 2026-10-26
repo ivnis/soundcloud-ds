@@ -16,9 +16,9 @@ SoundCloud → soundcloud-v2 → FFmpeg на VPS → TCP/HTTP → буфер DS 
 
 ## Быстрый запуск сервера в Windows
 
-Готовые файлы [релиза v0.1.0](https://github.com/ivnis/soundcloud-ds/releases/tag/v0.1.0)
-скачиваются отдельно: **soundcloud-ds-v0.1.0.nds** — клиент и
-**soundcloud-ds-server-v0.1.0.zip** — сервер. В серверном архиве есть собственные
+Готовые файлы [релиза v0.2.0](https://github.com/ivnis/soundcloud-ds/releases/tag/v0.2.0)
+скачиваются отдельно: **soundcloud-ds-v0.2.0.nds** — клиент и
+**soundcloud-ds-server-v0.2.0.zip** — сервер. В серверном архиве есть собственные
 инструкции на русском и английском, запуск для Windows и Docker Compose.
 Нужны оба файла и работающий bridge. Контрольные суммы — в SHA256SUMS.txt релиза.
 
@@ -159,13 +159,13 @@ g++ -std=c++17 -Wall -Wextra -Werror -Iclient/include tests/client_core.cpp clie
 Фактически выполненные проверки и оставшаяся приёмка записаны в [docs/VALIDATION.md](docs/VALIDATION.md).
 
 
-## Wi-Fi в разрабатываемой версии
+## Wi-Fi и домены в v0.2.0
 
 Для публикации локального bridge без Microsoft Store доступен
-[Cloudflare Tunnel](docs/CLOUDFLARE.ru.md). Разрабатываемый ROM поддерживает домены по HTTP: указать настоящий
+[Cloudflare Tunnel](docs/CLOUDFLARE.ru.md). ROM v0.2.0 поддерживает домены по HTTP: указать настоящий
 `your-tunnel.trycloudflare.com:80`. На v0.1.0 нужна более новая сборка.
 
-В разрабатываемой версии после v0.1.0 добавлен ручной ввод WEP-ключей и
+В v0.2.0 добавлен ручной ввод WEP-ключей и
 WPA2-Personal на DSi в нативном DSi-режиме. DS Fat/Lite аппаратно не поддерживает
 WPA/WPA2. [Пароли и ограничения Wi-Fi](docs/WIFI.ru.md).
 

@@ -64,5 +64,5 @@ jobs:
             "dist/soundcloud-ds-server-${GITHUB_REF_NAME}.zip" \
             dist/SHA256SUMS.txt \
             --verify-tag --latest \
-            --title "${GITHUB_REF_NAME} - First public release" \
+            --title "${GITHUB_REF_NAME} - SoundCloud DS" \
             --notes-file "docs/RELEASE_${GITHUB_REF_NAME}.md"

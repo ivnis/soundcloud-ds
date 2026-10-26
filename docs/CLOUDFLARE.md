@@ -31,7 +31,7 @@ The service is public to anyone who has its URL and has no uptime guarantee.
 ## Nintendo DS compatibility
 
 The tunnel's public HTTP and HTTPS health routes were both verified.
-**Development ROMs after v0.1.0 support HTTP hostnames**. In Settings, enter:
+**v0.2.0 ROMs support HTTP hostnames**. In Settings, enter:
 
 ```text
 your-tunnel.trycloudflare.com:80

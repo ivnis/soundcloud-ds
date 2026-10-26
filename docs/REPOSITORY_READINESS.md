@@ -4,6 +4,9 @@
 
 Prepared for `ivnis/soundcloud-ds` on 2026-10-25.
 
+This is a historical preparation record from before the first push. The project
+has since been published; current downloads and setup are linked in README.md.
+
 - Primary README is English, with reciprocal links to the Russian version.
 - Original code is GPL-3.0-only; third-party asset licenses are bundled.
 - Git branch is `main`, with origin `https://github.com/ivnis/soundcloud-ds.git`.
