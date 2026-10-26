@@ -62,4 +62,16 @@ int main(int argc, char** argv) {
     model.titleFrame=330;drawUi(top,bottom,model);save(folder+"/marquee-end.ppm");
     model.page = Page::Player; model.status = PlayStatus::Paused;
     drawUi(top, bottom, model); save(folder + "/paused.ppm");
+    model.page=Page::Browse;model.wifiPhase=0;model.networkCount=3;model.networkSelected=1;
+    const char* networks[]={"Open network","Home network","Legacy network"};
+    const char* security[]={"Open","WPA2","WEP"};
+    for(unsigned i=0;i<3;++i){std::snprintf(model.networks[i],34,"%s",networks[i]);std::snprintf(model.networkSecurity[i],9,"%s",security[i]);model.networkCompatible[i]=i!=1;}
+    model.message="WPA2 requires native DSi mode";
+    drawUi(top,bottom,model);save(folder+"/wifi-scan.ppm");
+    model.page=Page::Keyboard;model.editingServer=false;model.editingWifi=true;
+    model.passwordLabel="WPA2 password";model.query="************";model.numberKeyboard=false;model.russianKeyboard=false;
+    drawUi(top,bottom,model);save(folder+"/wifi-password.ppm");
+    model.numberKeyboard=true;model.passwordExtras=true;
+    drawUi(top,bottom,model);save(folder+"/wifi-symbols.ppm");
+
 }

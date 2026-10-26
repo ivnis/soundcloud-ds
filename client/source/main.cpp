@@ -15,6 +15,7 @@
 #include "endpoint.h"
 #include "autoplay.h"
 #include "layout.h"
+#include "wifi_key.h"
 
 static SeekBuffer<kBufferBytes, kHistoryBytes, kAheadBytes> audio;
 static NetRequest audioRequest(true), searchRequest(false);
@@ -34,6 +35,14 @@ static unsigned settingsSize = 0;
 static bool settingsBusy = false, settingsError = false, editingServer = false, editorError = false, wifiBackToSettings = false;
 static Page settingsReturn = Page::Browse;
 static int settingSelected = 0;
+static bool editingWifi=false, passwordVisible=false, passwordShifted=false;
+static unsigned passwordPage=0;
+static char wifiDraft[65]{}, wifiMasked[65]{};
+static Wifi_AccessPoint passwordAP{};
+static void clearWifiPassword(){
+    wipeWifiSecret(wifiDraft,sizeof(wifiDraft));wipeWifiSecret(wifiMasked,sizeof(wifiMasked));
+    editingWifi=passwordVisible=passwordShifted=false;passwordPage=0;
+}
 static SearchResults results, incomingResults;
 static Canvas topCanvas, bottomCanvas;
 static uint16_t *topVram, *bottomVram;
@@ -301,7 +310,7 @@ static void pollAudio() {
 }
 
 static void openKeyboard() {
-    editingServer = editorError = false;
+    clearWifiPassword(); editingServer = editorError = false;
     std::snprintf(queryBackup, sizeof(queryBackup), "%s", query);
     page = Page::Keyboard;
     keyboardSelected = 0;
@@ -360,7 +369,7 @@ static void openSettings() {
     scrubbing = false; page = Page::Settings; settingSelected = 0;
 }
 static void openServerEditor() {
-    editingServer = true; editorError = false; keyboardSelected = 0;
+    clearWifiPassword(); editingServer = true; editorError = false; keyboardSelected = 0;
     formatEndpoint(currentEndpoint(), serverDraft, sizeof(serverDraft)); page = Page::Keyboard;
 }
 static bool applyServer(const char* text) {
@@ -476,42 +485,71 @@ static void pollSearch() {
 }
 
 static void scanWifi() {
+    clearWifiPassword();editorError=false;
     stopAudio(); searchRequest.cancel(); searching = searchPending = false;
     artworkRequest.cancel(); artworkPending = false;
     if (!artwork.valid) artworkAttempted=false;
     relatedRequest.cancel(); relatedBusy=false; relatedPending=true; relatedAt=frame+120;
     settingsRequest.cancel(); settingsBusy = false;
     Wifi_DisconnectAP(); Wifi_ScanMode(); selectedAP = 0; wifi = Wifi::Scan;
-    std::snprintf(message, sizeof(message), "Open or saved WEP networks");
+    std::snprintf(message, sizeof(message), "Select a network; Y to enter a key");
 }
 
-static void connectWifi(bool saved = false) {
-    if (saved) { Wifi_AutoConnect(); std::snprintf(networkName, sizeof(networkName), "Saved network"); }
+static WifiSecurity securityOf(const Wifi_AccessPoint& ap){
+    return ap.security_type==AP_SECURITY_OPEN?WifiSecurity::Open:ap.security_type==AP_SECURITY_WEP?WifiSecurity::Wep:
+        ap.security_type==AP_SECURITY_WPA2?WifiSecurity::Wpa2:WifiSecurity::Unsupported;
+}
+static bool networkSupported(const Wifi_AccessPoint& ap){
+    return supportsWifiNetwork(securityOf(ap),(ap.flags&WFLAG_APDATA_COMPATIBLE)!=0,isDSiMode(),
+        ap.auth_type==AP_AUTH_PSK,ap.pair_crypt_type==AP_CRYPT_AES && ap.group_crypt_type==AP_CRYPT_AES);
+}
+static void connectWifi(bool saved = false,bool manual = false) {
+    int result=0;
+    if(saved){Wifi_AutoConnect();std::snprintf(networkName,sizeof(networkName),"Saved network");}
     else {
         Wifi_AccessPoint ap{};
-        if (Wifi_GetAPData(selectedAP, &ap) != 0) return;
-        std::snprintf(networkName, sizeof(networkName), "%.32s", ap.ssid);
-        if (!(ap.flags & WFLAG_APDATA_COMPATIBLE)) {
-            std::snprintf(message, sizeof(message), "Choose an open or WEP network"); return;
+        if(Wifi_GetAPData(selectedAP,&ap)!=WIFI_RETURN_OK)return;
+        std::snprintf(networkName,sizeof(networkName),"%.32s",ap.ssid);
+        if(!networkSupported(ap)){
+            const char* why=ap.security_type==AP_SECURITY_WPA2?
+                (!isDSiMode()?"WPA2 requires native DSi mode":ap.auth_type!=AP_AUTH_PSK?
+                    "WPA2 Enterprise is not supported":"Use WPA2-Personal with AES"):
+                ap.security_type==AP_SECURITY_WPA?"WPA/TKIP is not supported":"Network not supported in this mode";
+            std::snprintf(message,sizeof(message),"%s",why);return;
         }
-        if (ap.flags & WFLAG_APDATA_CONFIG_IN_WFC) Wifi_ConnectWfcAP(&ap);
-        else if (ap.security_type == AP_SECURITY_OPEN) {
-            Wifi_SetIP(0, 0, 0, 0, 0); Wifi_ConnectSecureAP(&ap, nullptr, 0);
-        } else { std::snprintf(message, sizeof(message), "Save the WEP key in WFC first"); return; }
+        if(!manual && (ap.flags&WFLAG_APDATA_CONFIG_IN_WFC))result=Wifi_ConnectWfcAP(&ap);
+        else if(ap.security_type==AP_SECURITY_OPEN){
+            Wifi_SetIP(0,0,0,0,0);result=Wifi_ConnectSecureAP(&ap,nullptr,0);
+        }else if(ap.security_type==AP_SECURITY_WEP || ap.security_type==AP_SECURITY_WPA2){
+            clearWifiPassword();passwordAP=ap;editingWifi=true;
+            editingServer=editorError=false;keyboardSelected=0;page=Page::Keyboard;return;
+        }else {std::snprintf(message,sizeof(message),"This security type is not supported");return;}
     }
-    wifi = Wifi::Joining; wifiStarted = frame;
+    if(result!=0){std::snprintf(message,sizeof(message),"Could not start Wi-Fi connection");return;}
+    wifi=Wifi::Joining;wifiStarted=frame;
+}
+static void submitWifiPassword(){
+    WifiKey key;
+    WifiSecurity security=passwordAP.security_type==AP_SECURITY_WEP?WifiSecurity::Wep:WifiSecurity::Wpa2;
+    if(!parseWifiKey(security,wifiDraft,key)){editorError=true;return;}
+    Wifi_SetIP(0,0,0,0,0);
+    int result=Wifi_ConnectSecureAP(&passwordAP,key.bytes,key.length);
+    wipeWifiSecret(&key,sizeof(key));clearWifiPassword();editorError=false;page=Page::Browse;
+    if(result!=0){std::snprintf(message,sizeof(message),"Key rejected. Select network to retry");return;}
+    wifi=Wifi::Joining;wifiStarted=frame;
 }
 
 static void cancelKeyboard() {
+    if(editingWifi){clearWifiPassword();editorError=false;page=Page::Browse;return;}
     if (editingServer) { editingServer = editorError = false; page = Page::Settings; }
     else { std::snprintf(query, sizeof(query), "%s", queryBackup); page = Page::Browse; }
 }
 static void keyboardKey(int index) {
-    KeyboardKey keys[48]; unsigned count = makeKeyboard(keys, russianKeyboard, numberKeyboard, editingServer);
+    KeyboardKey keys[48]; unsigned count = makeKeyboard(keys, editingWifi?false:russianKeyboard, editingWifi?passwordPage!=0:numberKeyboard, editingServer, editingWifi, passwordShifted, passwordPage==2);
     if (index < 0 || static_cast<unsigned>(index) >= count) return;
     keyboardSelected = index;
-    char* text = editingServer ? serverDraft : query;
-    std::size_t capacity = editingServer ? sizeof(serverDraft) : sizeof(query);
+    char* text = editingWifi ? wifiDraft : editingServer ? serverDraft : query;
+    std::size_t capacity = editingWifi ? sizeof(wifiDraft) : editingServer ? sizeof(serverDraft) : sizeof(query);
     const auto& key = keys[index];
     editorError = false;
     switch (key.action) {
@@ -519,23 +557,25 @@ static void keyboardKey(int index) {
         case KeyAction::Space: appendText(text, capacity, " "); break;
         case KeyAction::Backspace: eraseCodepoint(text); break;
         case KeyAction::Language: russianKeyboard = !russianKeyboard; keyboardSelected = 0; break;
-        case KeyAction::Numbers: numberKeyboard = !numberKeyboard; keyboardSelected = 0; break;
-        case KeyAction::Search: if (editingServer) applyServer(serverDraft); else submitSearch(); break;
+        case KeyAction::Numbers: if(editingWifi)passwordPage=(passwordPage+1)%3;else numberKeyboard = !numberKeyboard; keyboardSelected = 0; break;
+        case KeyAction::Shift: if(editingWifi)passwordShifted=!passwordShifted;break;
+        case KeyAction::Search: if(editingWifi)submitWifiPassword();else if (editingServer) applyServer(serverDraft); else submitSearch(); break;
     }
 }
 static void keyboardInput(unsigned keys, unsigned repeat) {
-    KeyboardKey keyboard[48]; unsigned count = makeKeyboard(keyboard, russianKeyboard, numberKeyboard, editingServer);
+    KeyboardKey keyboard[48]; unsigned count = makeKeyboard(keyboard, editingWifi?false:russianKeyboard, editingWifi?passwordPage!=0:numberKeyboard, editingServer, editingWifi, passwordShifted, passwordPage==2);
     if (repeat & KEY_LEFT) keyboardSelected = keyboardMove(keyboard, count, keyboardSelected, -1, 0);
     if (repeat & KEY_RIGHT) keyboardSelected = keyboardMove(keyboard, count, keyboardSelected, 1, 0);
     if (repeat & KEY_UP) keyboardSelected = keyboardMove(keyboard, count, keyboardSelected, 0, -1);
     if (repeat & KEY_DOWN) keyboardSelected = keyboardMove(keyboard, count, keyboardSelected, 0, 1);
     if (keys & KEY_B) cancelKeyboard();
-    else if (keys & KEY_X) { eraseCodepoint(editingServer ? serverDraft : query); editorError = false; }
-    else if (keys & KEY_Y) { if (editingServer) applyServer(serverDraft); else submitSearch(); }
+    else if (keys & KEY_X) { eraseCodepoint(editingWifi ? wifiDraft : editingServer ? serverDraft : query); editorError = false; }
+    else if (keys & KEY_Y) { if(editingWifi)submitWifiPassword();else if (editingServer) applyServer(serverDraft); else submitSearch(); }
     else if (keys & KEY_A) keyboardKey(keyboardSelected);
     if (keys & KEY_TOUCH) {
         touchPosition touch{}; touchRead(&touch);
         if (touch.py < 27 && touch.px > 200) cancelKeyboard();
+        else if(editingWifi && touch.py<27 && touch.px>=152)passwordVisible=!passwordVisible;
         else keyboardKey(keyboardHit(keyboard, count, touch.px, touch.py));
     }
 }
@@ -639,6 +679,7 @@ static void input(unsigned keys, unsigned repeat, unsigned held) {
         selectedAP = std::max(0, std::min(std::max(0, count - 1), selectedAP));
         if ((keys & KEY_A) && count) connectWifi();
         else if (keys & KEY_X) connectWifi(true);
+        else if ((keys & KEY_Y) && count) connectWifi(false,true);
         else if (keys & KEY_TOUCH) {
             touchPosition touch{}; touchRead(&touch);
             int first = std::max(0, selectedAP - 4);
@@ -665,6 +706,13 @@ static void render() {
     model.page = page; model.message = message; model.title = title; model.artist = artist;
     model.trackId = trackId; model.query = query; model.searchMessage = searchMessage;
     model.editingServer = editingServer; model.editorError = editorError;
+    model.editingWifi=editingWifi;model.passwordVisible=passwordVisible;model.passwordShifted=passwordShifted;model.passwordExtras=passwordPage==2;
+    if(editingWifi){
+        std::memset(wifiMasked,'*',std::strlen(wifiDraft));wifiMasked[std::strlen(wifiDraft)]=0;
+        model.query=passwordVisible?wifiDraft:wifiMasked;
+        model.passwordLabel=editorError?(passwordAP.security_type==AP_SECURITY_WEP?"WEP: 5/13 or 10/26 hex":"WPA2: 8-63 characters"):
+            passwordAP.security_type==AP_SECURITY_WEP?"WEP key":"WPA2 password";
+    }
     if (editingServer) model.query = serverDraft;
     formatEndpoint(currentEndpoint(), serverLabel, sizeof(serverLabel));
     model.emulatorMode=emulatorMode();model.showVolume=volumeTouched && frame-volumeChangedAt<90;
@@ -684,7 +732,7 @@ static void render() {
     model.bufferPercent = std::min(100u, static_cast<unsigned>(audio.size() * 100 / kAheadBytes));
     model.scrubbing = scrubbing;
     model.underruns = underruns; model.frame = frame; model.titleFrame = frame-audioStart; model.russianKeyboard = russianKeyboard;
-    model.numberKeyboard = numberKeyboard; model.keyboardSelected = keyboardSelected; model.diagnostics = diagnostics;
+    model.numberKeyboard = editingWifi?passwordPage!=0:numberKeyboard; model.keyboardSelected = keyboardSelected; model.diagnostics = diagnostics;
     model.status = playback == Playback::Loading ? (seeking ? PlayStatus::Seeking : PlayStatus::Connecting) : playback == Playback::Error ? PlayStatus::Error :
         playback == Playback::Finished ? PlayStatus::Finished : playback == Playback::Stopped ? (*title ? PlayStatus::Stopped : PlayStatus::Ready) :
         paused ? PlayStatus::Paused : !streamOpen || buffering ? PlayStatus::Buffering : PlayStatus::Playing;
@@ -694,6 +742,8 @@ static void render() {
         for (unsigned i = 0; i < model.networkCount; ++i) {
             Wifi_AccessPoint ap{}; Wifi_GetAPData(first + i, &ap);
             std::snprintf(model.networks[i], sizeof(model.networks[i]), "%.32s", ap.ssid);
+            std::snprintf(model.networkSecurity[i],sizeof(model.networkSecurity[i]),"%s",Wifi_ApSecurityTypeString(ap.security_type));
+            model.networkCompatible[i]=networkSupported(ap);
         }
     }
     drawUi(topCanvas, bottomCanvas, model);
@@ -708,7 +758,7 @@ int main() {
     bottomVram = bgGetGfxPtr(bgInitSub(2, BgType_Bmp16, BgSize_B16_256x256, 0, 0));
     lcdMainOnTop();
     mm_ds_system system{}; system.fifo_channel = FIFO_MAXMOD;
-    if (!mmInit(&system) || !Wifi_InitDefault(INIT_ONLY | WIFI_DS_MODE_ONLY)) {
+    if (!mmInit(&system) || !Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE)) {
         model.status = PlayStatus::Error; model.message = "Initialization failed. Restart the app."; model.results = &results;
         drawUi(topCanvas, bottomCanvas, model);
         DC_FlushRange(&topCanvas, sizeof(topCanvas)); DC_FlushRange(&bottomCanvas, sizeof(bottomCanvas));
@@ -719,7 +769,7 @@ int main() {
     keysSetRepeat(20, 5);
     loadPreferences();
     Wifi_EnableWifi(); Wifi_ScanMode();
-    std::snprintf(message, sizeof(message), "Open or saved WEP networks");
+    std::snprintf(message, sizeof(message), "Select a network; Y to enter a key");
     render();
     while (true) {
         cothread_yield_irq(IRQ_VBLANK);
@@ -739,7 +789,7 @@ int main() {
                 if (wifiBackToSettings) { page = Page::Settings; wifiBackToSettings = false; }
             }
             else if (status == ASSOCSTATUS_CANNOTCONNECT || frame - wifiStarted > 60 * 30) {
-                scanWifi(); std::snprintf(message, sizeof(message), "Couldn't connect. Try another network.");
+                scanWifi(); std::snprintf(message, sizeof(message), "Couldn't connect. Check network or key.");
             }
         } else if (wifi == Wifi::Ready) {
             if (Wifi_AssocStatus() != ASSOCSTATUS_ASSOCIATED) {
@@ -748,6 +798,6 @@ int main() {
         }
         if (frame % 6 == 0 || keys) render();
     }
-    stopAudio(); searchRequest.cancel(); artworkRequest.cancel(); settingsRequest.cancel(); relatedRequest.cancel(); Wifi_DisconnectAP(); Wifi_DisableWifi();
+    clearWifiPassword();stopAudio(); searchRequest.cancel(); artworkRequest.cancel(); settingsRequest.cancel(); relatedRequest.cancel(); Wifi_DisconnectAP(); Wifi_DisableWifi();
     return 0;
 }

@@ -135,11 +135,12 @@ void wifiScreen(Canvas& c,const UiModel& m) {
         bool selected=i==m.networkSelected; int y=48+i*23;
         c.round(8,y,240,21,selected?raised:panel);
         if (selected) c.rect(8,y+3,2,15,accent);
-        c.text(16,y+5,m.networks[i],selected?white:muted,222);
+        c.text(16,y+5,m.networks[i],selected?white:muted,166);
+        c.centerText(186,y,56,21,m.networkSecurity[i],m.networkCompatible[i]?accent:red);
     }
     if (!m.networkCount) c.centerText(12,56,232,32,"Scanning for networks...",white);
     c.centerText(8,165,240,15,m.message,muted);
-    c.centerText(8,180,240,12,"A Connect   X Saved Wi-Fi",dim);
+    c.centerText(8,180,240,12,"A Connect  Y Key  X Saved",dim);
 }
 void miniPlayer(Canvas& c,const UiModel& m) {
     c.rect(0,Layout::miniTop,256,Layout::miniHeight,panel);
@@ -199,12 +200,16 @@ void browse(Canvas& c,const UiModel& m) {
 void keyboard(Canvas& c,const UiModel& m) {
     c.clear(bg); c.rect(0,0,256,27,panel);
     if(m.editingServer)c.centerText(8,0,192,27,m.editorError?"Use IPv4:port":"Server address",m.editorError?red:white);
+    if(m.editingWifi){
+        c.centerText(8,0,144,27,m.passwordLabel,m.editorError?red:white);
+        c.centerText(152,0,48,27,m.passwordVisible?"Hide":"Show",accent);
+    }
     c.centerText(204,0,48,27,"Back",muted);
     c.round(8,31,240,24,panel);
     const char* text=m.query; while (codepointCount(text)>36) nextCodepoint(text);
-    c.text(15,37,*text?text:m.editingServer?"192.168.1.10:8000":"Track or artist...",*text?white:dim,222);
+    c.text(15,37,*text?text:m.editingWifi?"Enter network password...":m.editingServer?"192.168.1.10:8000":"Track or artist...",*text?white:dim,222);
     if ((m.frame/30)%2==0) c.rect(15+std::min(36u,codepointCount(text))*6,37,1,11,accent);
-    KeyboardKey keys[48]; unsigned count=makeKeyboard(keys,m.russianKeyboard,m.numberKeyboard,m.editingServer);
+    KeyboardKey keys[48]; unsigned count=makeKeyboard(keys,m.russianKeyboard,m.numberKeyboard,m.editingServer,m.editingWifi,m.passwordShifted,m.passwordExtras);
     for (unsigned i=0;i<count;++i) {
         const auto& key=keys[i]; bool submit=key.action==KeyAction::Search, selected=static_cast<int>(i)==m.keyboardSelected;
         c.round(key.x,key.y,key.w,key.h,submit?(*m.query?accent:raised):selected?raised:panel);

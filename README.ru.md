@@ -159,6 +159,12 @@ g++ -std=c++17 -Wall -Wextra -Werror -Iclient/include tests/client_core.cpp clie
 Фактически выполненные проверки и оставшаяся приёмка записаны в [docs/VALIDATION.md](docs/VALIDATION.md).
 
 
+## Wi-Fi в разрабатываемой версии
+
+В разрабатываемой версии после v0.1.0 добавлен ручной ввод WEP-ключей и
+WPA2-Personal на DSi в нативном DSi-режиме. DS Fat/Lite аппаратно не поддерживает
+WPA/WPA2. [Пароли и ограничения Wi-Fi](docs/WIFI.ru.md).
+
 ## Лицензия
 
 Код проекта: **GPL-3.0-only**, [LICENSE](LICENSE). Сторонние ресурсы сохраняют свои лицензии: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Автор: [ivnis](https://github.com/ivnis). Независимый homebrew-проект, не связанный с SoundCloud или Nintendo.

@@ -1,4 +1,5 @@
 #include "autoplay.h"
+#include "wifi_key.h"
 #include "http.h"
 #include "ring.h"
 #include "search.h"
@@ -251,5 +252,49 @@ int main() {
     unsigned serverKeys = makeKeyboard(keyboard, false, false, true);
     assert(serverKeys == 14 && std::strcmp(keyboard[13].label,"Apply server") == 0);
     for(unsigned i=0;i<serverKeys;++i)assert(keyboardHit(keyboard,serverKeys,keyboard[i].x+3,keyboard[i].y+3)==static_cast<int>(i));
+    WifiKey wifiKey;
+    assert(supportsWifiNetwork(WifiSecurity::Open,true,false,false,false));
+    assert(supportsWifiNetwork(WifiSecurity::Wep,true,false,false,false));
+    assert(!supportsWifiNetwork(WifiSecurity::Wpa2,true,false,true,true)); // DS mode.
+    assert(supportsWifiNetwork(WifiSecurity::Wpa2,true,true,true,true));
+    assert(!supportsWifiNetwork(WifiSecurity::Wpa2,true,true,false,true)); // Enterprise.
+    assert(!supportsWifiNetwork(WifiSecurity::Wpa2,true,true,true,false)); // TKIP.
+    assert(!supportsWifiNetwork(WifiSecurity::Wpa2,false,true,true,true));
+    assert(!supportsWifiNetwork(WifiSecurity::Unsupported,true,true,true,true));
+    assert(parseWifiKey(WifiSecurity::Wep,"6162636465",wifiKey));
+    assert(wifiKey.length==5 && std::memcmp(wifiKey.bytes,"abcde",5)==0);
+    assert(parseWifiKey(WifiSecurity::Wep,"ABCDEF0123456789abcdef0123",wifiKey) && wifiKey.length==13);
+    assert(parseWifiKey(WifiSecurity::Wep,"abcde",wifiKey) && wifiKey.length==5);
+    assert(parseWifiKey(WifiSecurity::Wep,"ThirteenChars",wifiKey) && wifiKey.length==13);
+    for(const char* invalid:{"", "four", "123456", "zzzzzzzzzz", "616263646x"}){
+        assert(!parseWifiKey(WifiSecurity::Wep,invalid,wifiKey));
+        assert(wifiKey.length==0);for(auto byte:wifiKey.bytes)assert(byte==0);
+    }
+    assert(parseWifiKey(WifiSecurity::Wpa2," Case$ensitive! ",wifiKey));
+    assert(wifiKey.length==16 && std::memcmp(wifiKey.bytes," Case$ensitive! ",16)==0);
+    std::string longest(63,'a'),tooLong(64,'a');
+    assert(parseWifiKey(WifiSecurity::Wpa2,longest.c_str(),wifiKey) && wifiKey.length==63);
+    assert(!parseWifiKey(WifiSecurity::Wpa2,tooLong.c_str(),wifiKey));
+    assert(!parseWifiKey(WifiSecurity::Wpa2,"short",wifiKey));
+    assert(!parseWifiKey(WifiSecurity::Wpa2,"nonascii\xc3\xa9",wifiKey));
+    assert(!parseWifiKey(WifiSecurity::Unsupported,"aPassword",wifiKey));
+    assert(parseWifiKey(WifiSecurity::Open,"",wifiKey));
+    assert(!parseWifiKey(WifiSecurity::Open,"password",wifiKey));
+    assert(parseWifiKey(WifiSecurity::Wpa2,"aPassword",wifiKey));
+    wipeWifiSecret(&wifiKey,sizeof(wifiKey));
+    assert(wifiKey.length==0);for(auto byte:wifiKey.bytes)assert(byte==0);
+    bool printable[127]{};printable[32]=true; // Space has its own key.
+    for(unsigned mode=0;mode<3;++mode)for(bool shifted:{false,true}){
+        unsigned count=makeKeyboard(keyboard,false,mode!=0,false,true,shifted,mode==2);
+        assert(count<=48 && std::strcmp(keyboard[count-1].label,"Connect")==0);
+        for(unsigned i=0;i<count;++i){
+            assert(keyboardHit(keyboard,count,keyboard[i].x+2,keyboard[i].y+2)==static_cast<int>(i));
+            if(keyboard[i].action==KeyAction::Letter){
+                unsigned c=static_cast<unsigned char>(keyboard[i].label[0]);
+                assert(c>=33 && c<=126 && keyboard[i].label[1]==0);printable[c]=true;
+            }
+        }
+    }
+    for(unsigned c=32;c<127;++c)assert(printable[c]);
     std::cout << "Client ring and HTTP tests passed\n";
 }

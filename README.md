@@ -22,6 +22,8 @@ SoundCloud or Nintendo.
 - Server-prepared 64x64 artwork, a matching UI palette, and audio-reactive visuals.
 - Automatic playback of related tracks, skipping recently played IDs.
 - Separate Emulator/Console server profiles and Wi-Fi settings.
+- Development builds: password entry for WEP and DSi-mode WPA2-Personal;
+  see [hardware restrictions and setup](docs/WIFI.md).
 - Shoulder-button volume with a temporary on-screen indicator.
 
 The interface is English. Russian is supported for text input and track metadata.
@@ -162,7 +164,10 @@ Artwork is a 4,624-byte indexed packet, decoded to RGB555 on the DS.
 Use one bridge worker: one audio stream is allowed at a time. The DS-to-bridge
 connection is plain HTTP without authentication. Use a trusted network or limit
 access to your bridge; this prototype is intended for personal use.
-DS Fat requires an open or saved WEP 2.4 GHz network; it cannot use WPA/WPA2.
+DS Fat/Lite requires an open or WEP 2.4 GHz network; it cannot use WPA/WPA2.
+Current development builds support manual WEP keys and WPA2-Personal on a DSi
+actually running in native DSi mode. This is not in the v0.1.0 ROM and physical
+encrypted-network association remains unverified. See [Wi-Fi support](docs/WIFI.md).
 Numeric IPv4 is required; the DS client does not resolve DNS or handle HTTPS.
 
 ## Development
