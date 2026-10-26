@@ -14,6 +14,9 @@
 constexpr unsigned kSampleRate = 22050;
 constexpr unsigned kBytesPerSecond = kSampleRate * 2;
 constexpr unsigned kHistoryBytes = kBytesPerSecond * 6;
-constexpr unsigned kAheadBytes = kBytesPerSecond * 8;
+constexpr unsigned kAheadBytes = kBytesPerSecond * 20;
 constexpr unsigned kBufferBytes = kHistoryBytes + kAheadBytes;
-constexpr unsigned kPrefillBytes = kBytesPerSecond * 2;
+constexpr unsigned kPrefillBytes = kBytesPerSecond * 6;
+constexpr unsigned rebufferBytes(unsigned gaps) {
+    return kBytesPerSecond * (gaps < 3 ? 6 + gaps * 2 : 12);
+}

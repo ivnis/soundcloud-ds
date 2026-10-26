@@ -7,7 +7,7 @@ Python/FastAPI + FFmpeg bridge. Search and control playback on the touchscreen;
 the bridge handles upstream HTTPS, audio conversion, artwork, and recommendations.
 
 ```text
-SoundCloud -> Python bridge / FFmpeg -> HTTP PCM -> Nintendo DS / Maxmod
+SoundCloud -> Python bridge / FFmpeg -> HTTP ADPCM -> Nintendo DS / Maxmod
 ```
 
 The current prototype has been tested in melonDS. **Physical DS Fat validation
@@ -25,6 +25,8 @@ SoundCloud or Nintendo.
 - Wi-Fi password entry for WEP and DSi-mode WPA2-Personal;
   see [hardware restrictions and setup](docs/WIFI.md).
 - Shoulder-button volume with a temporary on-screen indicator.
+- Development builds: IMA ADPCM audio uses about 74% less bandwidth, with earlier
+  artwork loading. Update both bridge and ROM; see [audio optimization](docs/AUDIO.md).
 
 The interface is English. Russian is supported for text input and track metadata.
 Accounts, private libraries, playlists, and stereo are not implemented.
@@ -156,9 +158,14 @@ finished. Previous/Next buttons navigate the current search results.
 
 ## Bridge and hardware limits
 
-Audio is mono, signed 16-bit little-endian PCM at 22,050 Hz (44,100 bytes/s).
-The DS keeps six seconds of history and up to eight seconds ahead; startup
-normally waits for two seconds. Distant seeks may require server rebuffering.
+Decoded audio is mono, signed 16-bit little-endian PCM at 22,050 Hz.
+Development ROMs request IMA ADPCM (about 11.3 KB/s); the default endpoint and
+released v0.2.0 ROM use PCM (44.1 KB/s). See [audio transport](docs/AUDIO.md).
+Development ROMs keep six seconds of history and up to 20 seconds ahead;
+startup waits for six seconds of audio, with adaptive 8–12-second recovery
+after underruns. Their pinned DSWifi build uses a larger TCP receive window.
+The v0.2.0 release used eight seconds ahead/two seconds of startup audio.
+Distant seeks may require server rebuffering.
 Artwork is a 4,624-byte indexed packet, decoded to RGB555 on the DS.
 
 Use one bridge worker: one audio stream is allowed at a time. The DS-to-bridge

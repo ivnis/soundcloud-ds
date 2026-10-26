@@ -71,7 +71,7 @@ bool HttpAudio::header() {
         return true;
     }
     if (!line_[0]) {
-        if (pcm_ && (!valid_rate_ || !valid_channels_ || !valid_format_)) return fail("Unsupported PCM format");
+        if (pcm_ && (!valid_rate_ || !valid_channels_ || !valid_format_)) return fail("Unsupported audio format");
         if (chunked_ && has_length_) return fail("Ambiguous HTTP framing");
         headers_done_ = true;
         if (has_length_ && content_length_ == 0) return fail("Empty audio stream");
@@ -93,7 +93,10 @@ bool HttpAudio::header() {
         has_length_ = true;
     } else if (equal(line_, "X-Audio-Rate")) valid_rate_ = equal(value, "22050");
     else if (equal(line_, "X-Audio-Channels")) valid_channels_ = equal(value, "1");
-    else if (equal(line_, "X-Audio-Format")) valid_format_ = equal(value, "s16le");
+    else if (equal(line_, "X-Audio-Format")) {
+        adpcm_ = equal(value, "ima4-ds-v1");
+        valid_format_ = adpcm_ || equal(value, "s16le");
+    }
     else if (equal(line_, "X-Track-Title")) decodeTitle(value, title_, sizeof(title_));
     else if (equal(line_, "X-Track-Artist")) decodeTitle(value, artist_, sizeof(artist_));
     else if (equal(line_, "X-Track-Duration-Ms")) {
@@ -155,7 +158,9 @@ bool HttpAudio::feed(const uint8_t* data, std::size_t count, Sink sink, void* co
         std::size_t take = count;
         uint64_t remaining = chunked_ ? chunk_left_ : has_length_ ? content_length_ - received_ : take;
         if (take > remaining) take = static_cast<std::size_t>(remaining);
-        if (!sink(context, data, take)) return fail("Audio buffer overflow");
+        if (pcm_ && adpcm_) {
+            if (!decoder_.feed(data, take, sink, context)) return fail("Invalid ADPCM block or audio buffer full");
+        } else if (!sink(context, data, take)) return fail("Audio buffer overflow");
         received_ += take;
         data += take;
         count -= take;
@@ -171,9 +176,10 @@ bool HttpAudio::eof() {
     if (error_) return false;
     if (!headers_done_ || (chunked_ && !done_) || (has_length_ && received_ != content_length_))
         return fail("Audio connection interrupted");
-    if (pcm_ && (!received_ || (received_ & 1))) return fail("Invalid PCM length");
+    uint64_t decoded = adpcm_ ? decoder_.decodedBytes() : received_;
+    if (pcm_ && (!decoded || (decoded & 1) || (adpcm_ && !decoder_.complete()))) return fail("Invalid audio length");
     if (pcm_ && start_ms_ > duration_) return fail("Invalid seek position");
-    if (pcm_ && duration_ - start_ms_ > 2000 && received_ * 1000 / 44100 + 2000 < duration_ - start_ms_)
+    if (pcm_ && duration_ - start_ms_ > 2000 && decoded * 1000 / 44100 + 2000 < duration_ - start_ms_)
         return fail("Audio ended too early");
     done_ = true;
     return true;

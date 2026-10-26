@@ -3,6 +3,7 @@
 #include "wifi_scan.h"
 #include "dns_cache.h"
 #include "http.h"
+#include "config.h"
 #include "ring.h"
 #include "search.h"
 #include "text.h"
@@ -41,6 +42,59 @@ static void parseEveryBoundary(const std::string& wire, const std::string& expec
 }
 
 int main() {
+    static_assert(kAheadBytes >= rebufferBytes(100), "Recovery must fit the ahead window");
+    assert(kPrefillBytes == kBytesPerSecond * 6);
+    assert(rebufferBytes(1) == kBytesPerSecond * 8);
+    assert(rebufferBytes(2) == kBytesPerSecond * 10);
+    assert(rebufferBytes(3) == rebufferBytes(100));
+    // IMA reference vector, independent of the server implementation:
+    // predictor 0/index 0, codes 7,F,7,F -> 11,-19,44,-92.
+    const uint8_t adpcm[] = {0,0,0,0,5,0,0xF7,0xF7};
+    const uint8_t decoded[] = {0,0,11,0,0xED,0xFF,44,0,0xA4,0xFF};
+    for (unsigned split=0; split<=sizeof(adpcm); ++split) {
+        AdpcmDecoder decoder;
+        std::vector<uint8_t> out;
+        assert(decoder.feed(adpcm,split,sink,&out));
+        assert(decoder.feed(adpcm+split,sizeof(adpcm)-split,sink,&out));
+        assert(decoder.complete() && decoder.decodedBytes()==sizeof(decoded));
+        assert(out==std::vector<uint8_t>(decoded,decoded+sizeof(decoded)));
+    }
+    {
+        // Two maximum blocks arriving byte-by-byte, including saturation.
+        std::vector<uint8_t> block(262,0x77), out;
+        block[0]=0xF8;block[1]=0x7F;block[2]=88;block[3]=0;block[4]=0;block[5]=2;
+        AdpcmDecoder decoder;
+        for (unsigned pass=0;pass<2;++pass)
+            for (auto byte:block) assert(decoder.feed(&byte,1,sink,&out));
+        assert(out.size()==2048 && decoder.complete());
+        assert(out[0]==0xF8 && out[1]==0x7F && out[2]==0xFF && out[3]==0x7F);
+    }
+    {
+        std::string wire="HTTP/1.1 200 OK\r\nX-Audio-Rate: 22050\r\nX-Audio-Channels: 1\r\n"
+            "X-Audio-Format: ima4-ds-v1\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n";
+        wire.append(reinterpret_cast<const char*>(adpcm),sizeof(adpcm));
+        wire+="\r\n0\r\n\r\n";
+        for (unsigned split=0;split<=wire.size();++split) {
+            HttpAudio parser;
+            std::vector<uint8_t> out;
+            assert(parser.feed(reinterpret_cast<const uint8_t*>(wire.data()),split,sink,&out));
+            assert(parser.feed(reinterpret_cast<const uint8_t*>(wire.data()+split),wire.size()-split,sink,&out));
+            assert(parser.eof());
+            assert(out==std::vector<uint8_t>(decoded,decoded+sizeof(decoded)));
+        }
+        HttpAudio truncated;
+        std::vector<uint8_t> out;
+        std::string partial="HTTP/1.0 200 OK\r\nX-Audio-Rate: 22050\r\nX-Audio-Channels: 1\r\n"
+            "X-Audio-Format: ima4-ds-v1\r\n\r\n";
+        partial.append(reinterpret_cast<const char*>(adpcm),sizeof(adpcm)-1);
+        assert(truncated.feed(reinterpret_cast<const uint8_t*>(partial.data()),partial.size(),sink,&out));
+        assert(!truncated.eof());
+        for (const auto& invalid : std::vector<std::vector<uint8_t>>{
+            {0,0,89,0,1,0}, {0,0,0,1,1,0}, {0,0,0,0,0,0}, {0,0,0,0,1,2}}) {
+            AdpcmDecoder bad;
+            assert(!bad.feed(invalid.data(),invalid.size(),sink,&out));
+        }
+    }
     Ring<8> ring;
     uint8_t input[] = {0,1,2,3,4,5,6,7,8,9}, output[10]{};
     assert(ring.write(input, 6) == 6);

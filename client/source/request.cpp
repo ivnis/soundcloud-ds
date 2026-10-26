@@ -92,6 +92,9 @@ void NetRequest::poll(unsigned frame, unsigned budget, HttpAudio::Sink sink, voi
                 lastActivity_ = frame;
                 if (!response_.feed(data, count, sink, context)) { fail(response_.error()); return; }
                 if (response_.done()) { finish(); return; }
+                // Service lwIP RX/ACK work between reads, rather than only at
+                // the next display frame, especially with a larger TCP window.
+                cothread_yield();
             } else if (count == 0) { finish(); return; }
             else { if (!waiting()) fail("Connection was lost"); break; }
         }

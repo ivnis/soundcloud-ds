@@ -18,6 +18,7 @@ class AudioJob:
         self._stderr_task = asyncio.create_task(self._drain_stderr())
         self._fallback_args = fallback_args
         self._produced = False
+        self._read_lock = asyncio.Lock()
         self.seek_fallback_used = False
 
     async def _drain_stderr(self):
@@ -71,7 +72,7 @@ class AudioJob:
 
     async def read(self):
         try:
-            block = await asyncio.wait_for(self.process.stdout.read(8192),
+            block = await asyncio.wait_for(self._read_stdout(),
                                            timeout=8 if self._fallback_args and not self._produced else 30)
         except TimeoutError as exc:
             if self._fallback_args and not self._produced:
@@ -92,7 +93,20 @@ class AudioJob:
             self._fallback_args = None
         return block
 
+    async def _read_stdout(self):
+        async with self._read_lock:
+            return await self.process.stdout.read(8192)
+
+    async def _discard_stdout(self):
+        async with self._read_lock:
+            while await self.process.stdout.read(8192):
+                pass
+
     async def _finish_process(self):
+        # Process.wait() can wait for pipe EOF even after terminate(). A full,
+        # paused stdout pipe must be drained or stream switches hit the 3s
+        # kill timeout (and leave Windows pipe transports open).
+        drain = asyncio.create_task(self._discard_stdout())
         if self.process.returncode is None:
             with suppress(ProcessLookupError):
                 self.process.terminate()
@@ -102,6 +116,7 @@ class AudioJob:
                 with suppress(ProcessLookupError):
                     self.process.kill()
                 await self.process.wait()
+        await drain
         await self._stderr_task
 
     async def close(self):

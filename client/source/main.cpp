@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include "config.h"
 #include "keyboard.h"
 #include "request.h"
@@ -66,6 +67,9 @@ static char query[193]{}, queryBackup[193]{}, submitted[193]{}, searchMessage[12
 static char searchBody[16384]{};
 static unsigned searchSize = 0, searchOffset = 0, searchStart = 0, searchAt = 0;
 static unsigned audioStart = 0, audioAt = 0;
+static char audioSession[17]{};
+static unsigned audioSerial = 0;
+static unsigned wireSampleBytes = 0, wireSampleAt = 0, wireBytesPerSecond = 0;
 static bool audioPending = false, searchPending = false, searching = false, searched = false;
 static bool russianKeyboard = false, numberKeyboard = false, diagnostics = false;
 static int keyboardSelected = 0;
@@ -98,6 +102,7 @@ static void stopAudio(bool resetTime = true) {
     audio.clear();
     paused = false; buffering = true; receivedEOF = false;
     metadataRead = false; drainFrame = 0;
+    wireSampleBytes = wireBytesPerSecond = 0; wireSampleAt = frame;
     if (resetTime) { playedSamples = 0; streamStartMs = 0; }
     playback = Playback::Stopped;
 }
@@ -118,7 +123,7 @@ static mm_word audioCallback(mm_word samples, mm_addr destination, mm_stream_for
     std::memset(visualTarget, 0, sizeof(visualTarget));
     if (paused) return samples;
     if (buffering) {
-        if (audio.size() >= kPrefillBytes || receivedEOF) buffering = false;
+        if (audio.size() >= rebufferBytes(underruns) || receivedEOF) buffering = false;
         else return samples;
     }
     if (audio.size() < bytes && !receivedEOF) { buffering = true; ++underruns; return samples; }
@@ -266,12 +271,21 @@ static void stepTrack(int direction) {
 
 static void pollAudio() {
     if (audioPending && frame >= audioAt) {
-        char path[128];
-        std::snprintf(path, sizeof(path), "/v1/audio?start_ms=%u%s%s", streamStartMs, *trackId ? "&track_id=" : "", trackId);
+        char path[192];
+        std::snprintf(path, sizeof(path), "/v1/audio?codec=ima4-ds-v1&start_ms=%u%s%s&session=%s&request_id=%u", streamStartMs, *trackId ? "&track_id=" : "", trackId, audioSession, ++audioSerial);
         audioPending = false;
         audioRequest.begin(path, frame);
     }
-    audioRequest.poll(frame, static_cast<unsigned>(audio.free()), audioSink, nullptr);
+    // A partially received ADPCM block can release 1024 decoded bytes at once.
+    // Reserve that space before allowing up to 4x wire-to-PCM expansion.
+    unsigned room = static_cast<unsigned>(audio.free());
+    uint64_t previousBytes = audioRequest.response().bodyBytes();
+    audioRequest.poll(frame, room > 1024 ? (room - 1024) / 4 : 0, audioSink, nullptr);
+    wireSampleBytes += static_cast<unsigned>(audioRequest.response().bodyBytes() - previousBytes);
+    if (frame - wireSampleAt >= 120) {
+        wireBytesPerSecond = wireSampleBytes * 60 / (frame - wireSampleAt);
+        wireSampleBytes = 0; wireSampleAt = frame;
+    }
     if (audioRequest.state() == NetRequest::State::Error) {
         int code = audioRequest.response().statusCode();
         if ((code == 409 || code == 503) && frame - audioStart < 60 * 38) {
@@ -326,12 +340,13 @@ static void openKeyboard() {
 
 static void pollArtwork() {
     if (artworkPending && frame >= artworkAt && metadataRead && !searching &&
-        playback != Playback::Loading && (audio.size() >= kPrefillBytes || receivedEOF)) {
+        playback != Playback::Loading && (audio.size() >= kBytesPerSecond / 4 || receivedEOF)) {
         char path[96]; std::snprintf(path, sizeof(path), "/v1/artwork%s%s", *trackId ? "?track_id=" : "", trackId);
         artworkSize = 0; artworkPending = false; artworkAttempted = true;
         artworkRequest.begin(path, frame);
     }
-    if (playback == Playback::Active && !paused && audio.size() < kPrefillBytes && !receivedEOF) return;
+    // Let the 4.6 KB cover make progress even when audio is still buffering.
+    if (playback == Playback::Active && !paused && audio.size() < kBytesPerSecond / 4 && !receivedEOF) return;
     unsigned room = sizeof(artworkBody) - artworkSize;
     artworkRequest.poll(frame, std::min(room ? room : 1u, 1024u), artworkSink, nullptr);
     if (artworkRequest.state() == NetRequest::State::Done) {
@@ -349,7 +364,8 @@ static bool relatedSink(void*,const uint8_t* bytes,std::size_t count) {
 }
 static void pollRelated() {
     if(relatedPending && frame>=relatedAt && metadataRead && !searching &&
-       playback!=Playback::Loading && (audio.size()>=kPrefillBytes || receivedEOF)) {
+       playback!=Playback::Loading && !artworkPending && !artworkRequest.active() &&
+       (!buffering || receivedEOF) && (audio.size()>=kBytesPerSecond*12 || receivedEOF)) {
         char path[96];std::snprintf(path,sizeof(path),"/v1/related%s%s",*trackId?"?track_id=":"",trackId);
         relatedSize=0;relatedPending=false;relatedBusy=true;relatedRequest.begin(path,frame);
     }
@@ -779,6 +795,8 @@ static void render() {
     model.durationMs = trackDurationMs;
     model.elapsed = model.elapsedMs / 1000;
     model.bufferPercent = std::min(100u, static_cast<unsigned>(audio.size() * 100 / kAheadBytes));
+    model.bufferMs = static_cast<unsigned>(audio.size() * 1000 / kBytesPerSecond);
+    model.wireBytesPerSecond = wireBytesPerSecond;
     model.scrubbing = scrubbing;
     model.underruns = underruns; model.frame = frame; model.titleFrame = frame-audioStart; model.russianKeyboard = russianKeyboard;
     model.numberKeyboard = editingWifi?passwordPage!=0:numberKeyboard; model.keyboardSelected = keyboardSelected; model.diagnostics = diagnostics;
@@ -817,6 +835,12 @@ int main() {
         return 1;
     }
     keysSetRepeat(20, 5);
+    // Per-boot identity, not authentication. Hash the MAC rather than sending it.
+    unsigned char mac[6]{};
+    Wifi_GetData(WIFIGETDATA_MACADDRESS, sizeof(mac), mac);
+    unsigned epoch = static_cast<unsigned>(std::time(nullptr)), hash = epoch ^ 2166136261u;
+    for (auto byte : mac) hash = (hash ^ byte) * 16777619u;
+    std::snprintf(audioSession, sizeof(audioSession), "%08x%08x", epoch, hash);
     loadPreferences();
     Wifi_EnableWifi(); Wifi_ScanModeFilter(WSCAN_LIST_AP_ALL); Wifi_ScanMode();
     std::snprintf(message, sizeof(message), "Select a network; Y to enter a key");

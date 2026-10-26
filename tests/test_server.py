@@ -199,6 +199,76 @@ def test_http11_real_audio(live_server):
     wait_free(base)
 
 
+def test_same_console_replaces_stream_without_tcp_disconnect(live_server):
+    base, port = live_server
+    wait_free(base)
+    session = "0123456789abcdef"
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as old:
+        old.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+        old.sendall((f"GET /v1/audio?codec=ima4-ds-v1&session={session}&request_id=1 HTTP/1.0\r\n"
+                     "Host: localhost\r\n\r\n").encode())
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += old.recv(4096)
+        assert b"200 OK" in data
+        # Keep the old TCP connection OPEN, as a buffering proxy can do.
+        before = time.monotonic()
+        with socket.socket() as new:
+            new.settimeout(10)
+            new.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+            new.connect(("127.0.0.1", port))
+            new.sendall((f"GET /v1/audio?codec=ima4-ds-v1&session={session}&request_id=2 HTTP/1.0\r\n"
+                         "Host: localhost\r\n\r\n").encode())
+            data = b""
+            while b"\r\n\r\n" not in data:
+                data += new.recv(4096)
+            assert b"200 OK" in data
+            assert time.monotonic() - before < 5
+            assert b"lookup;dur=" in data
+            assert httpx.get(base + "/healthz").json()["busy"]
+            # A late cleanup from stream 1 must not unlock stream 2.
+            assert httpx.get(base + "/v1/audio").status_code == 409
+            assert httpx.get(base + f"/v1/audio?session={session}&request_id=1").status_code == 409
+            assert httpx.get(base + "/v1/audio?session=fedcba9876543210&request_id=1").status_code == 409
+    wait_free(base)
+
+
+@pytest.mark.parametrize("query", ["session=0123456789abcdef", "request_id=1",
+                                   "session=x&request_id=1", "session=0123456789abcdef&request_id=0"])
+def test_invalid_stream_session_does_not_claim_slot(query):
+    with TestClient(create_app(Settings())) as client:
+        assert client.get("/v1/audio?" + query).status_code == 422
+        assert not client.get("/healthz").json()["busy"]
+
+
+def test_switch_cancels_previous_startup_and_closes_each_job_once():
+    async def check():
+        ready = asyncio.Event()
+        jobs = []
+
+        class WaitingJob(FakeJob):
+            async def read(self):
+                ready.set()
+                await asyncio.Event().wait()
+
+        async def factory(*_):
+            job = WaitingJob() if not jobs else FakeJob()
+            jobs.append(job)
+            return job
+
+        app = create_app(Settings(), job_factory=factory)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            old = asyncio.create_task(client.get("/v1/audio?session=0123456789abcdef&request_id=1"))
+            await asyncio.wait_for(ready.wait(), 2)
+            new = await asyncio.wait_for(client.get("/v1/audio?session=0123456789abcdef&request_id=2"), 2)
+            assert new.status_code == 200 and len(new.content) == 128
+            assert (await asyncio.wait_for(old, 2)).status_code == 409
+            assert not (await client.get("/healthz")).json()["busy"]
+        assert len(jobs) == 2 and all(job.closed == 1 for job in jobs)
+
+    asyncio.run(check())
+
+
 def test_ffmpeg_finite_pcm_length():
     from server.audio import AudioJob
 
@@ -213,5 +283,22 @@ def test_ffmpeg_finite_pcm_length():
         finally:
             await job.close()
         assert job.process.returncode == 0
+
+    asyncio.run(check())
+
+
+def test_ffmpeg_close_with_full_output_pipe_does_not_wait_for_kill_timeout():
+    from server.audio import AudioJob
+
+    async def check():
+        settings = Settings(test_seconds=600, ffmpeg=os.getenv("FFMPEG_BIN", "ffmpeg"))
+        job = await AudioJob.open(settings, Source(settings).resolve())
+        await job.read()
+        # Leave stdout unread so the asyncio pipe reaches its high-water mark.
+        await asyncio.sleep(0.3)
+        before = time.monotonic()
+        await asyncio.wait_for(job.close(), 2)
+        assert time.monotonic() - before < 2
+        assert job.process.returncode is not None
 
     asyncio.run(check())

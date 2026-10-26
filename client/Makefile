@@ -12,9 +12,27 @@ CXXFLAGS += -std=gnu++17 -Wextra -Werror
 
 ARM7ELF := $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi_maxmod.elf
 LIBS := -ldswifi9 -lmm9 -lnds9
-LIBDIRS := $(BLOCKSDS)/libs/dswifi $(BLOCKSDS)/libs/maxmod $(BLOCKSDS)/libs/libnds
+# A 5.8 KB TCP window throttles audio on high-latency Internet connections.
+# Build only the ARM9 library with a larger window, leaving the SDK untouched.
+WIFI_REV := 59d2636dd851ea26a4ea49f329321d3bfb002066
+WIFI_ROOT := $(abspath ../tools/.cache/dswifi-stream)
+WIFI_LIB := $(WIFI_ROOT)/lib/libdswifi9.a
+LIBDIRS := $(WIFI_ROOT) $(BLOCKSDS)/libs/maxmod $(BLOCKSDS)/libs/libnds
 
 include $(BLOCKSDS)/sys/default_makefiles/rom_arm9/Makefile
+
+$(WIFI_ROOT)/.stream-source:
+	git init "$(WIFI_ROOT)"
+	git -C "$(WIFI_ROOT)" fetch --depth 1 https://github.com/blocksds/dswifi.git $(WIFI_REV)
+	git -C "$(WIFI_ROOT)" checkout --detach FETCH_HEAD
+	sed -i 's/^#define TCP_WND .*/#define TCP_WND                     (32 * TCP_MSS)/' "$(WIFI_ROOT)/source/arm9/lwip/include/lwipopts.h"
+	touch "$@"
+
+$(WIFI_LIB): $(WIFI_ROOT)/.stream-source
+	$(MAKE) -C "$(WIFI_ROOT)" -f Makefile.arm9 ENABLE_LWIP=1 "BLOCKSDS=$(BLOCKSDS)" "WONDERFUL_TOOLCHAIN=$(WONDERFUL_TOOLCHAIN)" "SHELL=$(SHELL)"
+
+$(ELF): $(WIFI_LIB)
+$(OBJS_SOURCES): | $(WIFI_ROOT)/.stream-source
 
 $(ROM): ../VERSION
 

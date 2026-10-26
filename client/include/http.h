@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include "adpcm.h"
 
 // Incremental, allocation-free HTTP response parser. Handles arbitrary TCP
 // boundaries, chunk framing, and connection-close / content-length bodies.
@@ -31,6 +32,8 @@ private:
     unsigned duration_ = 0;
     unsigned start_ms_ = 0;
     bool pcm_ = true;
+    bool adpcm_ = false;
+    AdpcmDecoder decoder_;
     int status_code_ = 0;
     const char* error_ = nullptr;
     bool fail(const char* message) { error_ = message; return false; }

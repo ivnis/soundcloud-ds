@@ -53,6 +53,20 @@ keeps recommendations separate from current search results and remembers
 
 ## Audio
 
+Development builds after v0.2.0 also accept `codec=ima4-ds-v1` on `/v1/audio`.
+The ROM requests this compressed transport; the default remains `s16le` for
+compatibility. See [block format, bandwidth and scheduling](AUDIO.md).
+`/v1/track` includes `supported_formats` in addition to its default `format`.
+`X-Audio-Format` identifies the actual response encoding. The following
+description applies to the default PCM transport.
+
+Development audio requests can also supply `session` (16 lowercase hex digits)
+and `request_id` (1..4294967295); both must be present together. A newer request
+can replace the active stream of the same session even before TCP disconnect.
+Stale IDs, other sessions, and legacy requests receive 409 when appropriate.
+This is stream ownership, not authentication. `Server-Timing` exposes lookup
+and initial PCM preparation times; see [diagnostics](AUDIO.md#slow-switches-after-v020).
+
 Format: signed 16-bit little-endian mono PCM, 22,050 Hz, no WAV header.
 The body supports Content-Length, chunked framing, or completion by connection
 close; incomplete responses are rejected. Metadata comes from these headers:
