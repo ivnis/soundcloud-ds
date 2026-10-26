@@ -3,7 +3,7 @@
 #include "keyboard.h"
 #include "search.h"
 
-enum class Page { Browse, Keyboard, Player, Settings };
+enum class Page { Browse, Keyboard, Player, Settings, WifiWarning };
 enum class PlayStatus { Ready, Connecting, Seeking, Buffering, Playing, Paused, Stopped, Finished, Error };
 
 struct UiModel {
@@ -14,6 +14,7 @@ struct UiModel {
     char networkSecurity[5][9]{};
     bool networkCompatible[5]{};
     unsigned networkCount = 0, networkSelected = 0;
+    unsigned networkTotal=0, networkFirst=0;
     const char* message = "";
     const char* title = "";
     const char* artist = "";
@@ -31,6 +32,7 @@ struct UiModel {
     bool editingServer = false, editorError = false, settingsBusy = false, settingsError = false;
     bool editingWifi=false, passwordVisible=false, passwordShifted=false, passwordExtras=false;
     const char* passwordLabel="Wi-Fi password";
+    const char* wifiWarning="";
     const char* server = "";
     const char* networkName = "";
     const char* settingsMessage = "";

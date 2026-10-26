@@ -16,6 +16,7 @@
 #include "autoplay.h"
 #include "layout.h"
 #include "wifi_key.h"
+#include "wifi_scan.h"
 
 static SeekBuffer<kBufferBytes, kHistoryBytes, kAheadBytes> audio;
 static NetRequest audioRequest(true), searchRequest(false);
@@ -39,6 +40,12 @@ static bool editingWifi=false, passwordVisible=false, passwordShifted=false;
 static unsigned passwordPage=0;
 static char wifiDraft[65]{}, wifiMasked[65]{};
 static Wifi_AccessPoint passwordAP{};
+static Wifi_AccessPoint unsupportedAP{};
+static bool warningManualKey=false;
+static const char* wifiWarning="";
+static Wifi_AccessPoint scanAPs[32]{}, incomingAPs[32]{};
+static unsigned scanCount=0;
+static void refreshWifiScan();
 static void clearWifiPassword(){
     wipeWifiSecret(wifiDraft,sizeof(wifiDraft));wipeWifiSecret(wifiMasked,sizeof(wifiMasked));
     editingWifi=passwordVisible=passwordShifted=false;passwordPage=0;
@@ -491,7 +498,8 @@ static void scanWifi() {
     if (!artwork.valid) artworkAttempted=false;
     relatedRequest.cancel(); relatedBusy=false; relatedPending=true; relatedAt=frame+120;
     settingsRequest.cancel(); settingsBusy = false;
-    Wifi_DisconnectAP(); Wifi_ScanMode(); selectedAP = 0; wifi = Wifi::Scan;
+    Wifi_DisconnectAP(); Wifi_ScanModeFilter(WSCAN_LIST_AP_ALL); Wifi_ScanMode();
+    selectedAP = 0;scanCount=0;wifi = Wifi::Scan;
     std::snprintf(message, sizeof(message), "Select a network; Y to enter a key");
 }
 
@@ -503,30 +511,55 @@ static bool networkSupported(const Wifi_AccessPoint& ap){
     return supportsWifiNetwork(securityOf(ap),(ap.flags&WFLAG_APDATA_COMPATIBLE)!=0,isDSiMode(),
         ap.auth_type==AP_AUTH_PSK,ap.pair_crypt_type==AP_CRYPT_AES && ap.group_crypt_type==AP_CRYPT_AES);
 }
-static void connectWifi(bool saved = false,bool manual = false) {
+static void refreshWifiScan(){
+    uint8_t previous[6]{};bool keep=selectedAP>=0 && static_cast<unsigned>(selectedAP)<scanCount;
+    if(keep)std::memcpy(previous,scanAPs[selectedAP].bssid,6);
+    unsigned count=0;
+    int detected=std::min(32,Wifi_GetNumAP());
+    for(int i=0;i<detected;++i){
+        Wifi_AccessPoint ap{};
+        if(Wifi_GetAPData(i,&ap)!=WIFI_RETURN_OK || !(ap.flags&WFLAG_APDATA_ACTIVE))continue;
+        incomingAPs[count++]=ap;
+    }
+    std::sort(incomingAPs,incomingAPs+count,[](const auto& a,const auto& b){
+        bool ac=networkSupported(a),bc=networkSupported(b);
+        if(ac!=bc)return ac;
+        bool ah=hiddenWifiName(a.ssid,a.ssid_len),bh=hiddenWifiName(b.ssid,b.ssid_len);
+        if(ah!=bh)return !ah;
+        if(a.rssi!=b.rssi)return a.rssi>b.rssi;
+        return std::memcmp(a.bssid,b.bssid,6)<0;
+    });
+    std::copy(incomingAPs,incomingAPs+count,scanAPs);scanCount=count;
+    selectedAP=std::max(0,std::min(selectedAP,static_cast<int>(count)-1));
+    if(keep)for(unsigned i=0;i<count;++i)if(std::memcmp(previous,scanAPs[i].bssid,6)==0){selectedAP=i;break;}
+}
+static void connectWifi(bool saved = false,bool manual = false,bool tryUnsupported = false) {
     int result=0;
     if(saved){Wifi_AutoConnect();std::snprintf(networkName,sizeof(networkName),"Saved network");}
     else {
-        Wifi_AccessPoint ap{};
-        if(Wifi_GetAPData(selectedAP,&ap)!=WIFI_RETURN_OK)return;
+        if(!tryUnsupported && (selectedAP<0 || static_cast<unsigned>(selectedAP)>=scanCount))return;
+        Wifi_AccessPoint ap=tryUnsupported?unsupportedAP:scanAPs[selectedAP];
+        if(hiddenWifiName(ap.ssid,ap.ssid_len)){
+            std::snprintf(message,sizeof(message),"Hidden SSID: unhide it or use saved WFC");return;
+        }
         std::snprintf(networkName,sizeof(networkName),"%.32s",ap.ssid);
-        if(!networkSupported(ap)){
-            const char* why=ap.security_type==AP_SECURITY_WPA2?
-                (!isDSiMode()?"WPA2 requires native DSi mode":ap.auth_type!=AP_AUTH_PSK?
-                    "WPA2 Enterprise is not supported":"Use WPA2-Personal with AES"):
-                ap.security_type==AP_SECURITY_WPA?"WPA/TKIP is not supported":"Network not supported in this mode";
-            std::snprintf(message,sizeof(message),"%s",why);return;
+        if(!networkSupported(ap) && !tryUnsupported){
+            unsupportedAP=ap;warningManualKey=manual;
+            wifiWarning=!isDSiMode() && (ap.security_type==AP_SECURITY_WPA || ap.security_type==AP_SECURITY_WPA2)?
+                "DS Fat/Lite cannot use WPA/WPA2.\nThis test will not unlock support.":
+                "This network is not supported in\nthis mode. Connection may fail.";
+            page=Page::WifiWarning;return;
         }
         if(!manual && (ap.flags&WFLAG_APDATA_CONFIG_IN_WFC))result=Wifi_ConnectWfcAP(&ap);
         else if(ap.security_type==AP_SECURITY_OPEN){
             Wifi_SetIP(0,0,0,0,0);result=Wifi_ConnectSecureAP(&ap,nullptr,0);
-        }else if(ap.security_type==AP_SECURITY_WEP || ap.security_type==AP_SECURITY_WPA2){
+        }else if(ap.security_type==AP_SECURITY_WEP || ap.security_type==AP_SECURITY_WPA2 || ap.security_type==AP_SECURITY_WPA){
             clearWifiPassword();passwordAP=ap;editingWifi=true;
             editingServer=editorError=false;keyboardSelected=0;page=Page::Keyboard;return;
-        }else {std::snprintf(message,sizeof(message),"This security type is not supported");return;}
+        }else {page=Page::Browse;std::snprintf(message,sizeof(message),"This security type is not supported");return;}
     }
-    if(result!=0){std::snprintf(message,sizeof(message),"Could not start Wi-Fi connection");return;}
-    wifi=Wifi::Joining;wifiStarted=frame;
+    if(result!=0){page=Page::Browse;std::snprintf(message,sizeof(message),"Could not start Wi-Fi connection");return;}
+    page=Page::Browse;wifi=Wifi::Joining;wifiStarted=frame;
 }
 static void submitWifiPassword(){
     WifiKey key;
@@ -667,21 +700,33 @@ static void input(unsigned keys, unsigned repeat, unsigned held) {
     }
     if (page == Page::Keyboard) { keyboardInput(keys, repeat); return; }
     if (page == Page::Settings) { settingsInput(keys, repeat); return; }
+    if(page==Page::WifiWarning){
+        if(keys&(KEY_B|KEY_X)){page=Page::Browse;return;}
+        if(keys&(KEY_A|KEY_Y)){connectWifi(false,warningManualKey,true);return;}
+        if(keys&KEY_TOUCH){
+            touchPosition touch{};touchRead(&touch);
+            if((touch.py<27 && touch.px>=200) || (touch.py>=159 && touch.py<182))page=Page::Browse;
+            else if(touch.py>=123 && touch.py<150)connectWifi(false,warningManualKey,true);
+        }
+        return;
+    }
     if (keys & KEY_TOUCH) {
         touchPosition touch{}; touchRead(&touch);
         if (touch.py < 27 && touch.px >= 208) { openSettings(); return; }
     }
     if (wifi != Wifi::Ready && (keys & KEY_SELECT)) { openSettings(); return; }
     if (wifi == Wifi::Scan) {
-        int count = Wifi_GetNumAP();
+        int count = scanCount;
         if (repeat & KEY_UP) --selectedAP;
         if (repeat & KEY_DOWN) ++selectedAP;
         selectedAP = std::max(0, std::min(std::max(0, count - 1), selectedAP));
+        if(keys & KEY_B) {scanWifi();return;}
         if ((keys & KEY_A) && count) connectWifi();
         else if (keys & KEY_X) connectWifi(true);
         else if ((keys & KEY_Y) && count) connectWifi(false,true);
         else if (keys & KEY_TOUCH) {
             touchPosition touch{}; touchRead(&touch);
+            if(touch.py>=29 && touch.py<46 && touch.px>=184){scanWifi();return;}
             int first = std::max(0, selectedAP - 4);
             int chosen = first + (static_cast<int>(touch.py) - 48) / 23;
             if (touch.py >= 48 && touch.py < 163 && chosen < count) { selectedAP = chosen; connectWifi(); }
@@ -707,6 +752,7 @@ static void render() {
     model.trackId = trackId; model.query = query; model.searchMessage = searchMessage;
     model.editingServer = editingServer; model.editorError = editorError;
     model.editingWifi=editingWifi;model.passwordVisible=passwordVisible;model.passwordShifted=passwordShifted;model.passwordExtras=passwordPage==2;
+    model.wifiWarning=wifiWarning;
     if(editingWifi){
         std::memset(wifiMasked,'*',std::strlen(wifiDraft));wifiMasked[std::strlen(wifiDraft)]=0;
         model.query=passwordVisible?wifiDraft:wifiMasked;
@@ -737,11 +783,12 @@ static void render() {
         playback == Playback::Finished ? PlayStatus::Finished : playback == Playback::Stopped ? (*title ? PlayStatus::Stopped : PlayStatus::Ready) :
         paused ? PlayStatus::Paused : !streamOpen || buffering ? PlayStatus::Buffering : PlayStatus::Playing;
     if (wifi == Wifi::Scan) {
-        int count = Wifi_GetNumAP(), first = std::max(0, selectedAP - 4);
+        int count = scanCount, first = std::max(0, selectedAP - 4);
+        model.networkTotal=count;model.networkFirst=first;
         model.networkCount = std::max(0, std::min(5, count - first)); model.networkSelected = selectedAP - first;
         for (unsigned i = 0; i < model.networkCount; ++i) {
-            Wifi_AccessPoint ap{}; Wifi_GetAPData(first + i, &ap);
-            std::snprintf(model.networks[i], sizeof(model.networks[i]), "%.32s", ap.ssid);
+            const auto& ap=scanAPs[first+i];
+            formatWifiName(model.networks[i],sizeof(model.networks[i]),ap.ssid,ap.ssid_len,ap.bssid);
             std::snprintf(model.networkSecurity[i],sizeof(model.networkSecurity[i]),"%s",Wifi_ApSecurityTypeString(ap.security_type));
             model.networkCompatible[i]=networkSupported(ap);
         }
@@ -768,7 +815,7 @@ int main() {
     }
     keysSetRepeat(20, 5);
     loadPreferences();
-    Wifi_EnableWifi(); Wifi_ScanMode();
+    Wifi_EnableWifi(); Wifi_ScanModeFilter(WSCAN_LIST_AP_ALL); Wifi_ScanMode();
     std::snprintf(message, sizeof(message), "Select a network; Y to enter a key");
     render();
     while (true) {
@@ -781,6 +828,7 @@ int main() {
         ++frame; scanKeys();
         unsigned keys = keysDown(), repeat = keysDownRepeat(), held = keysHeld();
         if (keys & KEY_START) break;
+        if(wifi==Wifi::Scan && (frame%12==0 || scanCount==0))refreshWifiScan();
         input(keys, repeat, held);
         if (wifi == Wifi::Joining) {
             int status = Wifi_AssocStatus();

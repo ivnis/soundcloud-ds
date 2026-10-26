@@ -130,7 +130,11 @@ void wifiScreen(Canvas& c,const UiModel& m) {
         c.centerText(12,74,232,20,"This may take a moment.",muted);
         pill(c,12,146,232,"B  Cancel"); return;
     }
-    c.centerText(12,29,232,17,"Choose a network",muted);
+    char scanLabel[40];
+    if(m.networkTotal)std::snprintf(scanLabel,sizeof(scanLabel),"Networks %u-%u / %u",m.networkFirst+1,m.networkFirst+m.networkCount,m.networkTotal);
+    else std::snprintf(scanLabel,sizeof(scanLabel),"Scanning...");
+    c.centerText(8,29,172,17,scanLabel,muted);
+    c.round(188,29,60,17,raised);c.centerText(188,29,60,17,"Rescan",white);
     for (unsigned i=0;i<m.networkCount;++i) {
         bool selected=i==m.networkSelected; int y=48+i*23;
         c.round(8,y,240,21,selected?raised:panel);
@@ -139,8 +143,23 @@ void wifiScreen(Canvas& c,const UiModel& m) {
         c.centerText(186,y,56,21,m.networkSecurity[i],m.networkCompatible[i]?accent:red);
     }
     if (!m.networkCount) c.centerText(12,56,232,32,"Scanning for networks...",white);
+    if(m.networkTotal>5){
+        c.rect(251,48,2,115,raised);
+        int size=std::max(6u,115u*m.networkCount/m.networkTotal);
+        int offset=(115-size)*m.networkFirst/(m.networkTotal-m.networkCount);
+        c.rect(251,48+offset,2,size,accent);
+    }
     c.centerText(8,165,240,15,m.message,muted);
-    c.centerText(8,180,240,12,"A Connect  Y Key  X Saved",dim);
+    c.centerText(8,180,240,12,"A Join  Y Key  X Saved  B Scan",dim);
+}
+void wifiWarningScreen(Canvas& c,const UiModel& m){
+    c.clear(bg);c.rect(0,0,256,27,panel);
+    c.centerText(8,0,192,27,"Unsupported network",white);
+    c.centerText(200,0,56,27,"Back",muted);
+    c.centerText(8,34,240,24,m.networkName,white);
+    c.centerText(8,64,240,48,m.wifiWarning,red,4);
+    pill(c,8,123,240,"A  Try anyway",false,27);
+    pill(c,8,159,240,"B  Cancel");
 }
 void miniPlayer(Canvas& c,const UiModel& m) {
     c.rect(0,Layout::miniTop,256,Layout::miniHeight,panel);
@@ -326,6 +345,7 @@ void drawUi(Canvas& top,Canvas& bottom,const UiModel& model) {
     muted=blend(rgb(176,176,176),accent,5); dim=blend(rgb(112,112,112),accent,5);
     topScreen(top,model);
     if(model.page==Page::Settings)settings(bottom,model);
+    else if(model.page==Page::WifiWarning)wifiWarningScreen(bottom,model);
     else if(model.page==Page::Keyboard)keyboard(bottom,model);
     else if(model.wifiPhase!=2)wifiScreen(bottom,model);
     else if(model.page==Page::Player)player(bottom,model);

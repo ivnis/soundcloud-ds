@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     model.titleFrame=330;drawUi(top,bottom,model);save(folder+"/marquee-end.ppm");
     model.page = Page::Player; model.status = PlayStatus::Paused;
     drawUi(top, bottom, model); save(folder + "/paused.ppm");
-    model.page=Page::Browse;model.wifiPhase=0;model.networkCount=3;model.networkSelected=1;
+    model.page=Page::Browse;model.wifiPhase=0;model.networkCount=3;model.networkTotal=3;model.networkSelected=1;
     const char* networks[]={"Open network","Home network","Legacy network"};
     const char* security[]={"Open","WPA2","WEP"};
     for(unsigned i=0;i<3;++i){std::snprintf(model.networks[i],34,"%s",networks[i]);std::snprintf(model.networkSecurity[i],9,"%s",security[i]);model.networkCompatible[i]=i!=1;}
@@ -73,5 +73,9 @@ int main(int argc, char** argv) {
     drawUi(top,bottom,model);save(folder+"/wifi-password.ppm");
     model.numberKeyboard=true;model.passwordExtras=true;
     drawUi(top,bottom,model);save(folder+"/wifi-symbols.ppm");
+
+    model.page=Page::WifiWarning;model.networkName="POCO-DS";
+    model.wifiWarning="DS Fat/Lite cannot use WPA/WPA2.\nThis test will not unlock support.";
+    drawUi(top,bottom,model);save(folder+"/wifi-warning.ppm");
 
 }

@@ -1,5 +1,6 @@
 #include "autoplay.h"
 #include "wifi_key.h"
+#include "wifi_scan.h"
 #include "http.h"
 #include "ring.h"
 #include "search.h"
@@ -253,6 +254,18 @@ int main() {
     assert(serverKeys == 14 && std::strcmp(keyboard[13].label,"Apply server") == 0);
     for(unsigned i=0;i<serverKeys;++i)assert(keyboardHit(keyboard,serverKeys,keyboard[i].x+3,keyboard[i].y+3)==static_cast<int>(i));
     WifiKey wifiKey;
+    const uint8_t scanBssid[6]={0,1,2,0xa3,0xb4,0xc5};
+    char scanName[34];
+    formatWifiName(scanName,sizeof(scanName),"",0,scanBssid);
+    assert(std::strcmp(scanName,"Hidden A3:B4:C5")==0);
+    formatWifiName(scanName,sizeof(scanName),"POCO-DS",7,scanBssid);
+    assert(std::strcmp(scanName,"POCO-DS")==0);
+    formatWifiName(scanName,sizeof(scanName),"bad\nname",8,scanBssid);
+    assert(std::strcmp(scanName,"bad?name")==0);
+    char clipped[4];formatWifiName(clipped,sizeof(clipped),"POCO-DS",7,scanBssid);
+    assert(std::strcmp(clipped,"POC")==0);
+    char empty[1]={'x'};formatWifiName(empty,sizeof(empty),"",0,scanBssid);assert(empty[0]==0);
+    formatWifiName(nullptr,0,"",0,scanBssid);
     assert(supportsWifiNetwork(WifiSecurity::Open,true,false,false,false));
     assert(supportsWifiNetwork(WifiSecurity::Wep,true,false,false,false));
     assert(!supportsWifiNetwork(WifiSecurity::Wpa2,true,false,true,true)); // DS mode.
