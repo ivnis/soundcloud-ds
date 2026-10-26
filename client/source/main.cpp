@@ -17,6 +17,7 @@
 #include "layout.h"
 #include "wifi_key.h"
 #include "wifi_scan.h"
+#include "dns.h"
 
 static SeekBuffer<kBufferBytes, kHistoryBytes, kAheadBytes> audio;
 static NetRequest audioRequest(true), searchRequest(false);
@@ -31,8 +32,8 @@ static Artwork artwork;
 static uint8_t artworkBody[kArtworkBytes]{};
 static unsigned artworkSize = 0, artworkAt = 0, artworkRetries = 0;
 static bool artworkPending = false, artworkAttempted = false;
-static char settingsBody[512]{}, settingsMessage[96]{}, serverLabel[40]{}, serverDraft[64]{}, networkName[34]{};
-static unsigned settingsSize = 0;
+static char settingsBody[512]{}, settingsMessage[96]{}, serverLabel[kEndpointTextCapacity]{}, serverDraft[kEndpointInputCapacity]{}, networkName[34]{};
+static unsigned settingsSize = 0,settingsAt=0;
 static bool settingsBusy = false, settingsError = false, editingServer = false, editorError = false, wifiBackToSettings = false;
 static Page settingsReturn = Page::Browse;
 static int settingSelected = 0;
@@ -373,10 +374,10 @@ static void pollRelated() {
 
 static void openSettings() {
     if (page != Page::Settings) settingsReturn = page == Page::Player ? Page::Player : Page::Browse;
-    scrubbing = false; page = Page::Settings; settingSelected = 0;
+    scrubbing = false; page = Page::Settings; settingSelected = 0;settingsAt=frame;
 }
 static void openServerEditor() {
-    clearWifiPassword(); editingServer = true; editorError = false; keyboardSelected = 0;
+    clearWifiPassword(); editingServer = true; editorError = false; keyboardSelected = 0; numberKeyboard=false;
     formatEndpoint(currentEndpoint(), serverDraft, sizeof(serverDraft)); page = Page::Keyboard;
 }
 static bool applyServer(const char* text) {
@@ -389,22 +390,23 @@ static bool applyServer(const char* text) {
         searching = searchPending = searched = false; results = SearchResults{};
         title[0] = artist[0] = trackId[0] = query[0] = submitted[0] = searchMessage[0] = 0;
         trackDurationMs = model.duration = 0; selected = firstResult = 0;
-        setEndpoint(endpoint);
+        setEndpoint(endpoint);invalidateServerDns();
     }
     bool saved = savePreferences();
     std::snprintf(settingsMessage, sizeof(settingsMessage), "%s", saved ? "Server saved" : "Applied for this session");
-    settingsError = false; editingServer = editorError = false; page = Page::Settings;
+    settingsError = false; editingServer = editorError = false; page = Page::Settings;settingsAt=frame;
     return true;
 }
 static void changeConnectionMode(bool emulator) {
     if(emulatorMode()==emulator)return;
+    settingsAt=frame;
     selectEmulatorMode(emulator);
     ServerEndpoint target=currentEndpoint();
     selectEmulatorMode(!emulator);
     bool changed=std::strcmp(target.host,currentEndpoint().host)!=0 || target.port!=currentEndpoint().port;
     selectEmulatorMode(emulator);
     if(changed){
-        stopAudio();resetArtwork();searchRequest.cancel();settingsRequest.cancel();relatedRequest.cancel();
+        invalidateServerDns();stopAudio();resetArtwork();searchRequest.cancel();settingsRequest.cancel();relatedRequest.cancel();
         settingsBusy=relatedPending=relatedBusy=false;
         searching=searchPending=searched=false;results=SearchResults{};recommendations=SearchResults{};
         title[0]=artist[0]=trackId[0]=query[0]=submitted[0]=searchMessage[0]=0;
@@ -418,7 +420,7 @@ static void testServer() {
     if (wifi != Wifi::Ready) {
         settingsError = true; std::snprintf(settingsMessage, sizeof(settingsMessage), "Connect to Wi-Fi first"); return;
     }
-    settingsRequest.cancel(); settingsSize = 0; settingsBusy = true; settingsError = false;
+    settingsRequest.cancel(); invalidateServerDns();settingsSize = 0; settingsBusy = true; settingsError = false;
     settingsMessage[0] = 0; settingsRequest.begin("/healthz", frame);
 }
 static void pollSettings() {
@@ -430,7 +432,7 @@ static void pollSettings() {
         settingsBusy = false; settingsRequest.cancel();
     } else if (settingsRequest.state() == NetRequest::State::Error || settingsSize + 1 >= sizeof(settingsBody)) {
         settingsBusy = false; settingsError = true; settingsRequest.cancel();
-        std::snprintf(settingsMessage, sizeof(settingsMessage), "Server could not be reached");
+        std::snprintf(settingsMessage, sizeof(settingsMessage), "%s",*settingsRequest.error()?settingsRequest.error():"Invalid server response");
     }
 }
 
@@ -492,7 +494,7 @@ static void pollSearch() {
 }
 
 static void scanWifi() {
-    clearWifiPassword();editorError=false;
+    clearWifiPassword();editorError=false;invalidateServerDns();
     stopAudio(); searchRequest.cancel(); searching = searchPending = false;
     artworkRequest.cancel(); artworkPending = false;
     if (!artwork.valid) artworkAttempted=false;
@@ -584,10 +586,11 @@ static void keyboardKey(int index) {
     char* text = editingWifi ? wifiDraft : editingServer ? serverDraft : query;
     std::size_t capacity = editingWifi ? sizeof(wifiDraft) : editingServer ? sizeof(serverDraft) : sizeof(query);
     const auto& key = keys[index];
+    unsigned limit=editingServer?kEndpointInputCapacity-1:editingWifi?63:48;
     editorError = false;
     switch (key.action) {
-        case KeyAction::Letter: appendText(text, capacity, key.label); break;
-        case KeyAction::Space: appendText(text, capacity, " "); break;
+        case KeyAction::Letter: appendText(text, capacity, key.label,limit); break;
+        case KeyAction::Space: appendText(text, capacity, " ",limit); break;
         case KeyAction::Backspace: eraseCodepoint(text); break;
         case KeyAction::Language: russianKeyboard = !russianKeyboard; keyboardSelected = 0; break;
         case KeyAction::Numbers: if(editingWifi)passwordPage=(passwordPage+1)%3;else numberKeyboard = !numberKeyboard; keyboardSelected = 0; break;
@@ -767,7 +770,7 @@ static void render() {
         unsigned target=playback==Playback::Active && !paused && !buffering?visualTarget[i]:0;
         visualLevels[i]=static_cast<uint8_t>((visualLevels[i]*2+target)/3);
     }
-    model.server = serverLabel; model.networkName = networkName; model.settingSelected = settingSelected;
+    model.server = serverLabel;model.serverFrame=frame-settingsAt; model.networkName = networkName; model.settingSelected = settingSelected;
     model.settingsMessage = settingsMessage; model.settingsBusy = settingsBusy; model.settingsError = settingsError;
     model.cover = artwork.valid ? artwork.pixels : nullptr; model.accent = artwork.accent; model.onAccent = artwork.ink;
     model.results = &results; model.searching = searching; model.searched = searched;

@@ -1,6 +1,7 @@
 #include "request.h"
 #include "config.h"
 #include "endpoint.h"
+#include "dns.h"
 #include <nds.h>
 #include <dswifi9.h>
 #include <arpa/inet.h>
@@ -29,29 +30,36 @@ bool NetRequest::begin(const char* path, unsigned frame) {
     response_ = HttpAudio(pcm_);
     error_ = "";
     sent_ = 0;
-    const auto& endpoint = currentEndpoint();
+    endpoint_=currentEndpoint();
+    const auto& endpoint = endpoint_;
     int size = std::snprintf(request_, sizeof(request_),
         "GET %s HTTP/1.0\r\nHost: %s:%u\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
         path, endpoint.host, endpoint.port);
     if (size < 0 || static_cast<unsigned>(size) >= sizeof(request_)) { fail("Search query is too long"); return false; }
     length_ = size;
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_port = htons(endpoint.port);
-    if (inet_pton(AF_INET, endpoint.host, &address.sin_addr) != 1) { fail("Invalid server address"); return false; }
-    socket_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_ < 0) { fail("Could not open connection"); return false; }
-    int enabled = 1;
-    if (ioctl(socket_, FIONBIO, &enabled) < 0) { fail("Network setup failed"); return false; }
-    int result = connect(socket_, reinterpret_cast<sockaddr*>(&address), sizeof(address));
-    if (result < 0 && !waiting()) { fail("Server is unreachable"); return false; }
-    state_ = result == 0 ? State::Sending : State::Connecting;
-    lastActivity_ = frame;
+    state_=State::Resolving;
+    lastActivity_=frame;
     return true;
 }
 
 void NetRequest::poll(unsigned frame, unsigned budget, HttpAudio::Sink sink, void* context) {
     if (!active()) return;
+    if(state_==State::Resolving){
+        uint32_t resolved=0;
+        auto status=resolveServerIPv4(endpoint_.host,frame,resolved);
+        if(status==DnsStatus::Error){fail("DNS failed. Check host and Wi-Fi.");return;}
+        if(status==DnsStatus::Ready){
+            sockaddr_in address{};address.sin_family=AF_INET;
+            address.sin_port=htons(endpoint_.port);address.sin_addr.s_addr=resolved;
+            socket_=socket(AF_INET,SOCK_STREAM,0);
+            if(socket_<0){fail("Could not open connection");return;}
+            int enabled=1;
+            if(ioctl(socket_,FIONBIO,&enabled)<0){fail("Network setup failed");return;}
+            int result=connect(socket_,reinterpret_cast<sockaddr*>(&address),sizeof(address));
+            if(result<0 && !waiting()){invalidateServerDns();fail("Server is unreachable");return;}
+            state_=result==0?State::Sending:State::Connecting;lastActivity_=frame;
+        }
+    }
     if (state_ == State::Connecting) {
         fd_set writes, errors;
         FD_ZERO(&writes); FD_ZERO(&errors);
@@ -62,7 +70,7 @@ void NetRequest::poll(unsigned frame, unsigned budget, HttpAudio::Sink sink, voi
         if (ready > 0) {
             int error = 0;
             socklen_t size = sizeof(error);
-            if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &error, &size) < 0 || error) { fail("Server is unavailable"); return; }
+            if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &error, &size) < 0 || error) { invalidateServerDns(); fail("Server is unavailable"); return; }
             state_ = State::Sending;
             lastActivity_ = frame;
         }

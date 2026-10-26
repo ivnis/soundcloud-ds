@@ -65,6 +65,7 @@ bool HttpAudio::header() {
         if (code == 409) return fail("Server busy; retry");
         if (code == 416) return fail("Seek position is unavailable");
         if (code == 502 || code == 503 || code == 504) return fail("Audio source unavailable");
+        if(code>=300 && code<400)return fail("Redirect unsupported. Use an HTTP URL.");
         if (code != 200) return fail("Server HTTP error");
         status_seen_ = true;
         return true;

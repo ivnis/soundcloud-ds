@@ -4,7 +4,18 @@
 
 The bridge owns upstream SoundCloud HTTPS requests and FFmpeg processes.
 The DS uses nonblocking HTTP/1.0 sockets and Maxmod manual audio updates.
-Only numeric IPv4 endpoints are accepted by the DS UI.
+Development builds accept IPv4 addresses or ASCII DNS hostnames with optional
+ports, over HTTP. Missing ports default to 80. HTTPS URLs and IPv6 literals
+are rejected; DNS queries request IPv4 addresses. The v0.1.0 ROM is IPv4-only
+in its endpoint editor.
+
+One cooperative resolver task is shared by all requests, with an 8 KiB stack.
+Successful results are cached for five minutes and failures for two seconds.
+Changing servers/Wi-Fi or testing a connection invalidates the application
+cache; generations prevent an old in-flight lookup from repopulating it.
+An in-flight resolver is allowed to finish instead of destroying lwIP state.
+Each NetRequest snapshots its endpoint, preserves the original DNS hostname
+in Host, and waits in a Resolving state while the main loop keeps running.
 
 ## Endpoints
 

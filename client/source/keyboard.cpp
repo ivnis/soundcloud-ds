@@ -6,17 +6,6 @@
 
 unsigned makeKeyboard(KeyboardKey* keys, bool russian, bool numbers, bool server,
                       bool password, bool shifted, bool extraSymbols) {
-    if (server) {
-        const char* rows[] = {"123.", "456:", "7890"};
-        unsigned count = 0;
-        for (int row = 0; row < 3; ++row) for (int col = 0; col < 4; ++col) {
-            keys[count] = KeyboardKey{8 + col * 60, 62 + row * 23, 57, 21, {}, KeyAction::Letter};
-            keys[count++].label[0] = rows[row][col];
-        }
-        keys[count++] = KeyboardKey{8, 133, 240, 23, "Delete", KeyAction::Backspace};
-        keys[count++] = KeyboardKey{8, 164, 240, 23, "Apply server", KeyAction::Search};
-        return count;
-    }
     const char* latin[] = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
     const char* cyrillic[] = {"йцукенгшщзх", "фывапролджэ", "ячсмитьбюё"};
     const char* digits[] = {"1234567890", "-_.@&+!?/", "()'\":,;#"};
@@ -24,7 +13,7 @@ unsigned makeKeyboard(KeyboardKey* keys, bool russian, bool numbers, bool server
     const char* passwordExtras[] = {"\\|;:'\",.<>", "/?`~", "0123456789"};
     unsigned count = 0;
     for (int row = 0; row < 3; ++row) {
-        const char* text = password ? (numbers ? (extraSymbols?passwordExtras[row]:passwordSymbols[row]) : latin[row]) : numbers ? digits[row] : russian ? cyrillic[row] : latin[row];
+        const char* text = server ? (numbers?digits[row]:latin[row]) : password ? (numbers ? (extraSymbols?passwordExtras[row]:passwordSymbols[row]) : latin[row]) : numbers ? digits[row] : russian ? cyrillic[row] : latin[row];
         unsigned letters = codepointCount(text);
         int width = 238 / letters;
         int left = (256 - width * letters) / 2;
@@ -41,6 +30,7 @@ unsigned makeKeyboard(KeyboardKey* keys, bool russian, bool numbers, bool server
     }
     keys[count++] = KeyboardKey{8, 133, 42, 23, "", KeyAction::Language};
     std::snprintf(keys[count - 1].label, 12, "%s", russian ? "RU" : "EN");
+    if(server){keys[count-1].action=KeyAction::Letter;std::snprintf(keys[count-1].label,16,".");}
     if(password){keys[count-1].action=KeyAction::Shift;std::snprintf(keys[count-1].label,16,"%s",shifted?"SHIFT":"Shift");}
     keys[count++] = KeyboardKey{53, 133, 39, 23, "", KeyAction::Numbers};
     std::snprintf(keys[count - 1].label, 12, "%s", numbers ? "ABC" : "123");
@@ -49,6 +39,7 @@ unsigned makeKeyboard(KeyboardKey* keys, bool russian, bool numbers, bool server
     keys[count++] = KeyboardKey{195, 133, 53, 23, "delete", KeyAction::Backspace};
     keys[count++] = KeyboardKey{8, 164, 240, 23, "Search", KeyAction::Search};
     if(password)std::snprintf(keys[count-1].label,16,"Connect");
+    if(server)std::snprintf(keys[count-1].label,16,"Apply server");
     return count;
 }
 

@@ -161,20 +161,21 @@ void wifiWarningScreen(Canvas& c,const UiModel& m){
     pill(c,8,123,240,"A  Try anyway",false,27);
     pill(c,8,159,240,"B  Cancel");
 }
+void scrollingText(Canvas& c,int x,int y,int width,const char* value,uint16_t color,unsigned frame){
+    int travel=std::max(0,static_cast<int>(codepointCount(value))*6-width);
+    int offset=travel?std::clamp((static_cast<int>(frame%(travel*3+120))-60)/3,0,travel):0;
+    int left=x-offset;
+    while(*value && left<x+width){
+        unsigned index=glyph(nextCodepoint(value));
+        if(left+6>x)for(int gy=0;gy<11;++gy)for(int gx=0;gx<6;++gx)
+            if(left+gx>=x && left+gx<x+width && (kFont[index][gy]&(0x80>>gx)))c.rect(left+gx,y+gy,1,1,color);
+        left+=6;
+    }
+}
 void miniPlayer(Canvas& c,const UiModel& m) {
     c.rect(0,Layout::miniTop,256,Layout::miniHeight,panel);
     c.play(19,183,accent,m.status==PlayStatus::Playing,10);
-    const char* title=*m.title?m.title:"Play default track";
-    int travel=std::max(0,static_cast<int>(codepointCount(title))*6-180);
-    int offset=travel?std::clamp((static_cast<int>(m.titleFrame%(travel*3+120))-60)/3,0,travel):0;
-    // Clip each glyph to the title region, keeping transport buttons intact.
-    int left=38-offset;
-    while(*title && left<218){
-        unsigned index=glyph(nextCodepoint(title));
-        if(left+6>38)for(int y=0;y<11;++y)for(int x=0;x<6;++x)
-            if(left+x>=38 && left+x<218 && (kFont[index][y]&(0x80>>x)))c.rect(left+x,177+y,1,1,white);
-        left+=6;
-    }
+    scrollingText(c,38,177,180,*m.title?m.title:"Play default track",white,m.titleFrame);
     c.rect(235,179,8,8,accent);
 }
 void browse(Canvas& c,const UiModel& m) {
@@ -218,7 +219,7 @@ void browse(Canvas& c,const UiModel& m) {
 }
 void keyboard(Canvas& c,const UiModel& m) {
     c.clear(bg); c.rect(0,0,256,27,panel);
-    if(m.editingServer)c.centerText(8,0,192,27,m.editorError?"Use IPv4:port":"Server address",m.editorError?red:white);
+    if(m.editingServer)c.centerText(8,0,192,27,m.editorError?"HTTP host[:port]":"Server address",m.editorError?red:white);
     if(m.editingWifi){
         c.centerText(8,0,144,27,m.passwordLabel,m.editorError?red:white);
         c.centerText(152,0,48,27,m.passwordVisible?"Hide":"Show",accent);
@@ -226,7 +227,7 @@ void keyboard(Canvas& c,const UiModel& m) {
     c.centerText(204,0,48,27,"Back",muted);
     c.round(8,31,240,24,panel);
     const char* text=m.query; while (codepointCount(text)>36) nextCodepoint(text);
-    c.text(15,37,*text?text:m.editingWifi?"Enter network password...":m.editingServer?"192.168.1.10:8000":"Track or artist...",*text?white:dim,222);
+    c.text(15,37,*text?text:m.editingWifi?"Enter network password...":m.editingServer?"host:80 or IPv4:8000":"Track or artist...",*text?white:dim,222);
     if ((m.frame/30)%2==0) c.rect(15+std::min(36u,codepointCount(text))*6,37,1,11,accent);
     KeyboardKey keys[48]; unsigned count=makeKeyboard(keys,m.russianKeyboard,m.numberKeyboard,m.editingServer,m.editingWifi,m.passwordShifted,m.passwordExtras);
     for (unsigned i=0;i<count;++i) {
@@ -255,9 +256,10 @@ void player(Canvas& c,const UiModel& m) {
 void settings(Canvas& c,const UiModel& m) {
     c.clear(bg); c.rect(0,0,256,27,panel);
     c.centerText(8,0,48,27,"Back",muted); c.centerText(64,0,128,27,"Settings",white);
-    c.centerText(8,32,240,15,"Server / IPv4:port",muted);
+    c.centerText(8,32,240,15,"Server / host:port",muted);
     c.round(8,Layout::serverTop,240,Layout::serverHeight,m.settingSelected==0?raised:panel);
-    c.centerText(8,Layout::serverTop,240,Layout::serverHeight,m.server,white);
+    if(codepointCount(m.server)*6<=216)c.centerText(8,Layout::serverTop,240,Layout::serverHeight,m.server,white);
+    else scrollingText(c,20,Layout::serverTop+(Layout::serverHeight-11)/2,216,m.server,white,m.serverFrame);
     pill(c,8,Layout::modeTop,116,"Emulator",m.emulatorMode,Layout::modeHeight);
     pill(c,132,Layout::modeTop,116,"Console",!m.emulatorMode,Layout::modeHeight);
     c.round(8,Layout::wifiTop,240,Layout::wifiHeight,m.settingSelected==2?raised:panel);

@@ -37,9 +37,9 @@ inline unsigned codepointCount(const char* text) {
     return count;
 }
 
-inline bool appendText(char* target, std::size_t capacity, const char* value) {
+inline bool appendText(char* target, std::size_t capacity, const char* value,unsigned maxCodepoints=48) {
     std::size_t used = std::strlen(target), extra = std::strlen(value);
-    if (used + extra >= capacity || codepointCount(target) + codepointCount(value) > 48) return false;
+    if (used + extra >= capacity || codepointCount(target) + codepointCount(value) > maxCodepoints) return false;
     std::memcpy(target + used, value, extra + 1);
     return true;
 }

@@ -1,8 +1,11 @@
 #pragma once
 #include <cstddef>
+constexpr std::size_t kEndpointHostCapacity=254;
+constexpr std::size_t kEndpointTextCapacity=272;
+constexpr std::size_t kEndpointInputCapacity=288;
 
 struct ServerEndpoint {
-    char host[16];
+    char host[kEndpointHostCapacity];
     unsigned port;
 };
 bool parseEndpoint(const char* text, ServerEndpoint& result);

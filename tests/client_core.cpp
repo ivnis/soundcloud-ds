@@ -1,6 +1,7 @@
 #include "autoplay.h"
 #include "wifi_key.h"
 #include "wifi_scan.h"
+#include "dns_cache.h"
 #include "http.h"
 #include "ring.h"
 #include "search.h"
@@ -93,9 +94,43 @@ int main() {
     assert(parseEndpoint(" http://192.168.001.010:8000/ ", endpoint));
     char address[40]; formatEndpoint(endpoint, address, sizeof(address));
     assert(std::strcmp(address, "192.168.1.10:8000") == 0);
-    for (const char* invalid : {"https://1.2.3.4:80", "host:80", "1.2.3:80", "256.1.1.1:80",
+    for (const char* invalid : {"https://1.2.3.4:80", "bad_host:80", "1.2.3:80", "256.1.1.1:80",
                                "1.2.3.4:0", "1.2.3.4:65536", "1.2.3.4:80/path", "1.2.3.4:", ""})
         assert(!parseEndpoint(invalid, endpoint));
+    for(const char* valid:{"bridge.example.com","http://bridge.example.com/","BRIDGE.Example.COM.:80","localhost"}){
+        assert(parseEndpoint(valid,endpoint) && endpoint.port==80);
+    }
+    assert(parseEndpoint("http://Tunnel.Example.com:8765/",endpoint));
+    assert(std::strcmp(endpoint.host,"tunnel.example.com")==0 && endpoint.port==8765);
+    char domainText[kEndpointTextCapacity];formatEndpoint(endpoint,domainText,sizeof(domainText));
+    assert(std::strcmp(domainText,"tunnel.example.com:8765")==0);
+    for(const char* invalid:{"https://bridge.example.com","a..b:80","-bad.example:80","bad-.example:80",
+                            "bridge.example:80/path","a@b:80","[::1]:80","a:80\r\nHost:evil","a?x=1","a#x","a:abc","a:","."})
+        assert(!parseEndpoint(invalid,endpoint));
+    std::string label(63,'a'),longDomain=label+"."+label+"."+label+"."+std::string(61,'b');
+    assert(longDomain.size()==253 && parseEndpoint(longDomain.c_str(),endpoint));
+    formatEndpoint(endpoint,domainText,sizeof(domainText));
+    ServerEndpoint restored{};assert(parseEndpoint(domainText,restored) && std::strcmp(restored.host,endpoint.host)==0);
+    assert(!parseEndpoint((std::string(64,'a')+".example").c_str(),endpoint));
+    assert(!parseEndpoint((longDomain+"a").c_str(),endpoint));
+    DnsCache dns;uint32_t resolved=0;DnsStatus dnsState=DnsStatus::Pending;
+    unsigned generation=dns.generation();
+    assert(!dns.lookup("one.example",100,resolved,dnsState));
+    assert(dns.publish("one.example",0x01020304,true,100,generation));
+    assert(dns.lookup("one.example",101,resolved,dnsState) && resolved==0x01020304 && dnsState==DnsStatus::Ready);
+    assert(!dns.lookup("two.example",101,resolved,dnsState));
+    assert(!dns.lookup("one.example",100+60*300,resolved,dnsState));
+    dns.invalidate();
+    assert(!dns.publish("one.example",0x05060708,true,200,generation)); // Late result from the old Wi-Fi/server.
+    assert(!dns.lookup("one.example",201,resolved,dnsState));
+    assert(dns.publish("two.example",0,false,200,dns.generation()));
+    assert(dns.lookup("two.example",201,resolved,dnsState) && dnsState==DnsStatus::Error);
+    assert(!dns.publish("one.example",1,true,202,generation));
+    assert(dns.lookup("two.example",203,resolved,dnsState) && dnsState==DnsStatus::Error);
+    assert(!dns.lookup("two.example",320,resolved,dnsState));
+    dns.invalidate();
+    assert(dns.publish("wrap.example",7,true,0xfffffff0u,dns.generation()));
+    assert(dns.lookup("wrap.example",5,resolved,dnsState) && resolved==7);
     assert(emulatorMode() && std::strcmp(currentEndpoint().host,"10.64.0.1")==0 && currentEndpoint().port==8765);
     auto previous = currentEndpoint();
     assert(parseEndpoint("10.64.0.1:8765", endpoint));
@@ -250,9 +285,23 @@ int main() {
         }
         assert(keyboardHit(keyboard, count, 0, 0) == -1);
     }
-    unsigned serverKeys = makeKeyboard(keyboard, false, false, true);
-    assert(serverKeys == 14 && std::strcmp(keyboard[13].label,"Apply server") == 0);
-    for(unsigned i=0;i<serverKeys;++i)assert(keyboardHit(keyboard,serverKeys,keyboard[i].x+3,keyboard[i].y+3)==static_cast<int>(i));
+    for(bool numbers:{false,true}){
+        unsigned serverKeys=makeKeyboard(keyboard,false,numbers,true);
+        assert(serverKeys<=48 && std::strcmp(keyboard[serverKeys-1].label,"Apply server")==0);
+        bool dot=false,colon=false,letter=false,digit=false,hyphen=false;
+        for(unsigned i=0;i<serverKeys;++i){
+            assert(keyboardHit(keyboard,serverKeys,keyboard[i].x+3,keyboard[i].y+3)==static_cast<int>(i));
+            if(keyboard[i].action==KeyAction::Letter){
+                char c=keyboard[i].label[0];dot|=c=='.';colon|=c==':';hyphen|=c=='-';
+                letter|=c>='a'&&c<='z';digit|=c>='0'&&c<='9';
+            }
+        }
+        assert(dot);if(numbers)assert(colon&&digit&&hyphen);else assert(letter);
+    }
+    char longInput[kEndpointInputCapacity]{};
+    assert(appendText(longInput,sizeof(longInput),longDomain.c_str(),kEndpointInputCapacity-1));
+    assert(std::strcmp(longInput,longDomain.c_str())==0);
+    assert(!appendText(longInput,sizeof(longInput),"x")); // Search retains its 48-character default.
     WifiKey wifiKey;
     const uint8_t scanBssid[6]={0,1,2,0xa3,0xb4,0xc5};
     char scanName[34];
@@ -287,6 +336,9 @@ int main() {
     assert(wifiKey.length==16 && std::memcmp(wifiKey.bytes," Case$ensitive! ",16)==0);
     std::string longest(63,'a'),tooLong(64,'a');
     assert(parseWifiKey(WifiSecurity::Wpa2,longest.c_str(),wifiKey) && wifiKey.length==63);
+    char passwordInput[65]{};
+    assert(appendText(passwordInput,sizeof(passwordInput),longest.c_str(),63));
+    assert(!appendText(passwordInput,sizeof(passwordInput),"x",63));
     assert(!parseWifiKey(WifiSecurity::Wpa2,tooLong.c_str(),wifiKey));
     assert(!parseWifiKey(WifiSecurity::Wpa2,"short",wifiKey));
     assert(!parseWifiKey(WifiSecurity::Wpa2,"nonascii\xc3\xa9",wifiKey));

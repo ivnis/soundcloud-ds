@@ -26,6 +26,7 @@ struct UiModel {
     int selected = 0, first = 0, volume = 96, keyboardSelected = 0;
     unsigned elapsed = 0, duration = 0, bufferPercent = 0, underruns = 0, frame = 0;
     unsigned titleFrame = 0;
+    unsigned serverFrame = 0;
     unsigned elapsedMs = 0, durationMs = 0;
     bool scrubbing = false;
     bool russianKeyboard = false, numberKeyboard = false, diagnostics = false;

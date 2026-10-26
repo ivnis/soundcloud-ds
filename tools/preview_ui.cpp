@@ -78,4 +78,10 @@ int main(int argc, char** argv) {
     model.wifiWarning="DS Fat/Lite cannot use WPA/WPA2.\nThis test will not unlock support.";
     drawUi(top,bottom,model);save(folder+"/wifi-warning.ppm");
 
+    model.wifiPhase=2;model.page=Page::Settings;model.server="example-long-tunnel-name.trycloudflare.com:80";model.serverFrame=0;
+    drawUi(top,bottom,model);save(folder+"/domain-settings.ppm");
+    model.page=Page::Keyboard;model.editingWifi=false;model.editingServer=true;
+    model.query=model.server;model.numberKeyboard=false;model.editorError=false;
+    drawUi(top,bottom,model);save(folder+"/domain-editor.ppm");
+
 }

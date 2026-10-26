@@ -117,7 +117,7 @@ open the gear in the top-right corner of the touchscreen.
 
 - **Emulator:** `10.64.0.1:8765` is the preset for melonDS indirect networking
   with the Windows local helper. Set port `8000` when using the Docker bridge.
-- **Console:** enter the numeric LAN/VPS IPv4 and port of your bridge.
+- **Console:** enter the LAN/VPS IPv4 or DNS hostname and port of your bridge.
   `127.0.0.1` points to the DS itself and is not the PC's address.
 - Tap the address to edit it; use **Test connection** to check the bridge.
 
@@ -168,7 +168,11 @@ DS Fat/Lite requires an open or WEP 2.4 GHz network; it cannot use WPA/WPA2.
 Current development builds support manual WEP keys and WPA2-Personal on a DSi
 actually running in native DSi mode. This is not in the v0.1.0 ROM and physical
 encrypted-network association remains unverified. See [Wi-Fi support](docs/WIFI.md).
-Numeric IPv4 is required; the DS client does not resolve DNS or handle HTTPS.
+Development builds after v0.1.0 accept IPv4 or DNS names over **HTTP**.
+Use `bridge.example.com:8000` or `http://bridge.example.com`; without a port,
+HTTP defaults to 80. DNS runs in one shared cooperative worker with a bounded
+cache. HTTPS/TLS and IPv6 endpoint syntax are not implemented. The published
+v0.1.0 ROM still accepts numeric IPv4 only.
 
 ## Development
 
@@ -201,6 +205,8 @@ ordinary builds do not require asset-generation tools.
 
 - [API and architecture](docs/API.md) (English).
 - [Publishing checklist](docs/PUBLISHING.md) (English).
+- [Cloudflare Tunnel without Microsoft Store](docs/CLOUDFLARE.md) (English/Russian;
+  includes HTTP hostname setup for development ROMs).
 - [Русская документация и подробная настройка](README.ru.md).
 - Detailed development notes in Russian: [UI/settings/artwork](docs/UI_ARTWORK_SETTINGS.md),
   [search](docs/SEARCH_UI.md), [seeking](docs/SEEK_AND_ARTWORK.md),
